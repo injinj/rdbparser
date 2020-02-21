@@ -19,7 +19,7 @@ There are a couple of other tools for doing this, the ones I have found are:
 These are wonderful, but they are not something I can use in a program.
 
 I created a document that details my understanding of the stucture of Rdb,
-[Redis Rdb Dump Structures](https://github.com/injinj/rdbparser/rdb.adoc).
+[Redis Rdb Dump Structures](rdb.adoc).
 
 ## What is Rdbparser?
 
