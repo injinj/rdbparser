@@ -36,8 +36,6 @@ enum RdbMeta {
   RDB_EOF         = 0xff
 };
 
-static const uint16_t MIN_RDB_VERSION = 9; /* check version >= MIN_VERSION */
-
 /* decoding status errors */
 enum RdbErrCode {
   RDB_OK          = 0,
@@ -751,7 +749,7 @@ struct RdbDecode {
   uint64_t    crc;      /* trail crc check, if present */
   RdbString   key;      /* the key in a rdb file, not in a dump */
   uint64_t    key_cnt;  /* count of keys decoded */
-  uint16_t    ver;      /* trail ver check (MIN_RDB_VERSION) */
+  uint16_t    ver;      /* rdb ver check */
   bool        is_rdb_file; /* "dump" or "save" used, if "save", then true */
 
   RdbDecode()
