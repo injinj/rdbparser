@@ -1,5 +1,7 @@
 # Readme for Rdbparser
 
+[![Copr build status](https://copr.fedorainfracloud.org/coprs/injinj/gold/package/rdbparser/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/injinj/gold/package/rdbparser/)
+
 1. [Why does Rdbparser exist?](#why-does-rdbparser-exist-)
 2. [What is Rdbparser?](#what-is-rdbparser-)
 4. [Build or Install on Fedora / CentOS](#build-or-install-on-fedora--centos)
