@@ -1,0 +1,21 @@
+# RPM build
+/rpmbuild
+# DEB build
+/dpkgbuild
+# Build temporaries
+/RH*
+/FC*
+/UB*
+/DEB*
+/SUN*
+# history files
+.*history
+# vim swap files
+.*.sw*
+.sw*
+# obj files
+*.o
+*.so
+*.out
+core.[0-9]?*
+*.rpm

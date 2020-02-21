@@ -1,0 +1,684 @@
+Redis Rdb Dump Structures
+=========================
+:toc: left
+
+References
+----------
+
+- The source.
+  https://github.com/antirez/redis
+- The rdb-tools wiki.
+  https://github.com/sripathikrishnan/redis-rdb-tools/wiki/Redis-RDB-Dump-File-Format
+- A redis-replicator wiki.
+  https://github.com/leonchen83/redis-replicator/wiki/RDB-dump-data-format
+- The List Pack format.
+  https://github.com/antirez/listpack/blob/master/listpack.md
+
+Rdb Dump
+--------
+
+The Rdb format as output by the *dump* command, always has these 5 elements.
+
+|===========================================
+| <<RdbType>> | <<RdbLength>> | <<Body>> | Rdb Version | CRC64
+| 1 Byte, Range: 0 -> 15
+| Length of Body
+| Body data
+| 0x09 0x00 = version 9
+| 8 bytes, CRC64(Type, Length, Body, Version)
+|===========================================
+
+The Rdb format as output by the *save* command adds the key and some meta
+information.  The value format is similar to the *dump* command.  The CRC64 and
+Rdb version are only in the file once.  The *dump* command does not add key and
+expiry to the data it outputs.
+
+|===========================================
+| <<RdbMeta>> | <<RdbType>> | <<RdbLength>> | Key | <<RdbLength>> | <<Body>>
+| Optional key expiry, LRU
+| 1 Byte, Range: 0 -> 15
+| Length of Key
+| Key data
+| Length of Body
+| Body data
+|===========================================
+
+These sequences are repeated for each key saved to the Rdb file.  The last 8
+bytes in the file should be a CRC64 of the entire file.  The header of the
+file, before the data is encoded, contains a magic "REDIS000X" string, and the
+same kind of <<RdbMeta>> fields that may appear before a key.
+
+[[RdbMeta]]
+Rdb Meta
+--------
+
+The info about the database, *Redis* version, current time, and key expiry is
+encoded with prefix 0xf7 to 0xff.  These do not conflict with the <<RdbType>>,
+which would start the data encoding of the key values.
+
+[options="header",cols="2,1,4"]
+|===========================================
+| Meta            | Number | Notes
+| MODULE_AUX      | 0xf7   | Module specific coding
+| IDLE            | 0xf8   | Length encoding, in seconds
+| FREQ            | 0xf9   | One byte, a LRU code
+| AUX             | 0xfa   | Two strings (var = value)
+| DBRESIZE        | 0xfb   | Two lengths
+| EXPIRED_MS      | 0xfc   | 8 bytes, UTC millisecs, little endian
+| EXPIRED_SEC     | 0xfd   | 4 bytes, UTC seconds, little endian
+| DBSELECT        | 0xfe   | Length encoding
+| EOF             | 0xff   | 0xff
+|===========================================
+
+The length coding in the Notes above, uses <<RdbLength>> type coding, but
+cannot be an immediate integer, they must use length coding.
+
+An example of <<RdbMeta>> coding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The only key in this example database Rdb file is the one added below, setting
+the key "k" to the value "string" with an expiration of 5000 secs.
+
+--------------------------------------
+$ redis-cli set k string ex 5000
+OK
+$ redis-cli save
+OK
+$ xxd /var/lib/redis/dump.rdb
+00000000: 5245 4449 5330 3030 39fa 0972 6564 6973  REDIS0009..redis
+          A                     B  C               A         BC
+00000010: 2d76 6572 0b39 3939 2e39 3939 2e39 3939  -ver.999.999.999
+                    D                                  D
+00000020: fa0a 7265 6469 732d 6269 7473 c040 fa05  ..redis-bits.@..
+          E                             F    G     E           F G
+00000030: 6374 696d 65c2 bb14 495e fa08 7573 6564  ctime...I^..used
+                      H            I                    H    I
+00000040: 2d6d 656d c278 2e0d 00fa 0c61 6f66 2d70  -mem.x.....aof-p
+                    J           K                      J    K
+00000050: 7265 616d 626c 65c0 00fe 00fb 0101 fc45  reamble........E
+                           L    M    N       O            L M N  O
+00000060: 6e11 4e70 0100 0000 016b 0673 7472 696e  n.Np.....k.strin
+                           P  Q    R                      PQ R
+00000070: 67ff 28ba 74ac 619d 4539                 g.(.t.a.E9
+            S  T                                    ST
+--------------------------------------
+
+A. "REDIS0009" -- The magic string which codes the Rdb version in Ascii.
+B. 0xfa -- The code for AUX.  These are always variable = value style, with two
+  <<RdbLength>> encoded values, a string variable and an integer or a string
+  value.
+C. 0x09 72 65 ... -- Length 9, the string "redis-ver"
+D. 0x0b 39 39 ... -- Length 11, the string "999.999.999".  The 0xfa in {B}
+   coded the two strings "redis-ver" = "999.999.999".
+E. 0xfa 0a 72 65 ... -- AUX, Length 10, the string "redis-bits".
+F. 0xc0 40 -- The immediate integer 0x40, or 64, setting "redis-bits" = 64.
+G. 0xfa 05 63 74 69 6d -- AUX, Length 5, the string "ctime"
+H. 0xc2 bb 14 49 5e -- The immediate integer 0x5e4914bb, or 1581847739, setting
+   "ctime" = 1581847739, which is UTC seconds.
+I. 0xfa 08 75 73 ... -- AUX, Length 8, the string "used-mem"
+J. 0xc2 78 2e 0d 00 -- The immediate integer 0xd2e78, or 863864, setting
+   "used-mem" = 863864.
+K. 0xfa 0c 61 6f ... -- AUX, Length 12, the string "aof-preamble"
+L. 0xc0 00 -- The immediate integer 0, setting "aof-preamble" = 0.
+M. 0xfe 00 -- DBSELECT, the current database = 0.
+N. 0xfb 01 01 -- DBRESIZE, resize = { 1, 1 }.
+O. 0xfc 45 6e 11 4e 70 01 00 00 -- EXPIRED_MS, set the 8 byte UTC expired stamp
+   in milliseconds to 0x1704e116e45 or 1581857730117.  This applies to the key
+   that follows this stamp, which starts at {P}.
+P. 0x00 -- The <<RdbType>> 0, or STRING, the simplest coding.
+Q. 0x01 6b -- The key length is 1 and the key data is "k" (ascii code 0x6b).
+R. 0x06 73 74 72 69 6e 67 -- The value of the key "k" is "string".
+S. 0xff -- The EOF marker.
+T. 0x28 ba 74 ... -- The CRC64 of the file up to and including {S}.
+
+Lets examine the output of the *dump* command.
+
+--------------------------------------
+$ redis-cli dump k | xxd
+00000000: 0006 7374 7269 6e67 0900 91ea 2f4c facd  ..string..../L..
+00000010: 7a3e 0a                                  z>.
+--------------------------------------
+
+The key data and expiry is not present, but the "string" value is.  The tail
+of the dump is the version and CRC64.
+
+[[RdbType]]
+Rdb Type
+--------
+
+The type range is 0 to 15 in version 9 of *Redis* Rdb.  Some of the
+enumerations are no longer used in this version.  The number is coded in the
+first byte of the dump format, it determines how to interpret the rest of the
+data.
+
+[options="header",cols="2,1,4"]
+|===========================================
+| Type            | Number | Notes
+| STRING          | 0      | A string of bytes *
+| LIST            | 1      | List of string elements
+| SET             | 2      | List of string members *
+| ZSET            | 3      | String and string coded double score
+| HASH            | 4      | List of strings for each field and value *
+| ZSET_2          | 5      | String and double binary coded score *
+| MODULE          | 6      | No description yet
+| MODULE_2        | 7      | No description yet *
+| HASH_ZIPMAP     | 9      | Not used, uses ZipList
+| LIST_ZIPLIST    | 10     | Not used, uses QuickList
+| SET_INTSET      | 11     | Array of integers, all the same size *
+| ZSET_ZIPLIST    | 12     | A ZipList of members and scores *
+| HASH_ZIPLIST    | 13     | A ZipList of fields and values *
+| LIST_QUICKLIST  | 14     | A list of ZipLists *
+| STREAM_LISTPACK | 15     | A structure that uses ListPack lists *
+|===========================================
+
+* The only types found in a version 9 dump, are: STRING, SET,
+HASH, ZSET_2, SET_INTSET, ZSET_ZIPLIST, HASH_ZIPLIST,
+LIST_QUICKLIST, STREAM_LISTPACK.
+
+[[RdbLength]]
+Rdb Length
+----------
+
+--------------------------------------
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+A |0 0 . . . . . .|      6 bit length
+B |0 1 . . . . . . . . . . . . . .|  14 bit length
+C |1 0 0 0 0 0 0 0 . . . 32 bit length . . . . . . . . . . . . ...>
+D |1 0 0 0 0 0 0 1 . . . 64 bit length . . . . . . . . . . . . ...>
+E |1 1 0 0 0 0 0 0 . . . . . . . .|  8 bit immediate int
+F |1 1 0 0 0 0 0 1 . . . 16 bit immediate int  . .|
+G |1 1 0 0 0 0 1 0 . . . 32 bit immediate int  . . . . . . . . ...>
+H |1 1 0 0 0 0 1 1 . . . LZF <zlen> <len>  . . . . . . . . . . ...>
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+--------------------------------------
+
+A. 6 bit length -- range 0 -> 63 bytes.
+   [ 0x00 -> 0x3f ]
+B. 14 bit length -- range 0 -> 16383 bytes.
+   [ 0x4000 -> 0x7fff ]
+C. 32 bit length -- range 0 -> 4GB bytes.
+   [ 0x80 32bits -> 0x80 32bits ]
+D. 64 bit length -- range 0 -> 2^64-1 bytes.
+   [ 0x81 64bits -> 0x81 64bits ]
+E. 8 bit immediate integer -- range -128 -> 127 int.
+   [ 0xc0 00 -> 0xc0 ff ]
+F. 16 bit immediate integer -- range -32K -> 32K-1 int.
+   [ 0xc1 0000 -> 0xc1 ffff ]
+G. 32 bit immediate integer -- range -2G -> 2G-1 int.
+   [ 0xc2 32bits -> 0xc2 32bits ]
+H. LZF compressed data.
+   [ 0xc3 <zlen> <len> ]
+
+The length codes are big endian (msb first: 4321), and the immediate codes are
+little endian (lsb first: 1234).  The Intel archetecture is natively little
+endian.
+
+The length codes {A,B,C,D} are usually used for determining the end of a stream
+of bytes, but it can also be used to indicate the number of elements in a ZSET
+or the number of blobs of items in a STREAM_LISTPACK.  Since the length codes
+have 64 bit unsigned range, they are also used when a large number is encoded
+and data does not follow.  The immediate integer range is limited to 32 bit
+signed values.
+
+The immediate integers {E,F,G} are the data, there is no stream of bytes or
+elements that follow.  They are all signed values, the lengths are all unsigned
+values.
+
+Compressed data {H} is like length codes, because data in the stream follows
+the code, unlike the immediate integer codes.  After uncompressing zlen bytes,
+these are removed and the len bytes are inserted.
+
+The examples in this document are short enough that compression does not help.
+In normal circumstances, compression will be used a lot in cases where there
+are more than a couple of elements of data, since it does not take a lot of it
+for compression to be useful.
+
+[[Body]]
+Body
+----
+
+In the Body, the <<RdbType>> selects different codings schemes
+
+- STRING : The data length or immediate integer is encoded by the <<RdbLength>>
+  field.  <<STRING>>
+- HASH/SET : A count of <<RdbLength>> encoded values, one for each set member
+  and two for each hash entry. <<SET>>
+- ZIPLIST{HASH,ZSET} : A <<ZipList>> encoded stream.  The <<RdbLength>> in the
+  header is the length of the stream in bytes. <<HASH_ZIPLIST>>
+- QUICKLIST{LIST} : A <<QuickList>> is an array of <<ZipList>> streams
+  concatenated together.  The <<RdbLength>> in the header is the count of
+  <<ZipList>> streams in the array. <<LIST_QUICKLIST>>
+- ZSET_2{ZSET} : A count of members encoded with the scores.  After each
+  member, a floating point double in little endian format is coded for the
+  score.
+- LISTPACK{STREAM} : A <<ListPack>> is similar to a <<ZipList>>, it is used
+  for encoding record entries within a STREAM data type.  <<STREAM_LISTPACK>>
+
+[[STRING]]
+An example of STRING coding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+--------------------------------------
+$ redis-cli set k string
+OK
+$ redis-cli dump k | xxd
+00000000: 0006 7374 7269 6e67 0900 91ea 2f4c facd  ..string..../L..
+          A B  C              D    E
+00000010: 7a3e 0a                                  z>.
+--------------------------------------
+
+A. 0x00 -- A STRING <<RdbType>>.
+B. 0x06 -- A <<RdbLength>>, indicating 6 bytes follow.
+C. 0x73 74 72 69 6e 67 -- The "string" data.
+D. 0x09 00 -- The Rdb version.
+E. 0x91 ... 0a -- The CRC64 checksum, with a newline from redis-cli.
+
+The <<RdbType>> is the first byte, 0x00, the <<RdbLength>> is the second byte,
+0x06, and the data "string" follows.  The trailing bytes is the version
+(0x0900) followed by the CRC64 of the previous 10 bytes.
+
+[[SET]]
+An example of SET coding
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+--------------------------------------
+$ redis-cli sadd s string 1 2 3 four
+(integer) 5
+$ redis-cli dump s | xxd
+00000000: 0205 c003 c001 c002 0673 7472 696e 6704  .........string.
+          A B  C    D    E    F G              H
+00000010: 666f 7572 0900 616f e121 b97c 9a93 0a    four..ao.!.|...
+          I         J    K
+--------------------------------------
+
+A. 0x02 -- A SET <<RdbType>>.
+B. 0x05 -- A <<RdbLength>>, indicating 5 members of the set.
+C. 0xc0 03 -- A <<RdbLength>>, coding the immediate integer 3.
+D. 0xc0 01 -- A <<RdbLength>>, coding the immediate integer 1.
+E. 0xc0 02 -- A <<RdbLength>>, coding the immediate integer 2.
+F. 0x06 -- A <<RdbLength>>, indicating 6 bytes follow.
+G. 0x73 74 72 69 6e 67 -- The "string" data.
+H. 0x04 -- A <<RdbLength>>, indicating 4 bytes follow.
+I. 0x66 6f 75 72 -- The "four" data.
+J. 0x09 00 -- The Rdb version.
+K. 0x61 ... 0a -- The CRC64 checksum, with a newline from redis-cli.
+
+The <<RdbType>> is 0x02 for a SET type.  The rest of the data is coded with 6
+<<RdbLength>> values.  In this case the first <<RdbLength>>, value 5, is the
+number of items that are in the set.  After the length, there are 5 items
+coded.  Some are coded as lengths, and some are coded as immediate integers.
+The bytes 0xc0 0x03 are coding the immediate integer 3, this is a member
+of the set.
+
+[[ZipList]]
+Zip List
+--------
+
+A <<ZipList>> is a list of items that can be traversed forwards and in reverse.
+The <<ZipList>> structure has a header followed by elements with links in both
+directions between them.  It is used by many of the data types in *Redis*.  
+
+--------------------------------------
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  zlbytes size, 4 bytes                                        |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  zltail offset, 4 bytes                                       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  zllen entry count, 2 bytes   |    0x00       |    zlnext     |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  optional data                |    zlprev     |    zlnext     |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  optional data                |    0xff       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+--------------------------------------
+
+- [[zlbytes]]zlbytes -- The length in bytes of the list, including header.
+- [[zltail]]zltail   -- The offset to the last element in the list for
+  traversing in reverse.
+- [[zllen]]zllen   -- The count of elements in the list, which is valid up to
+  the maximum 16 bit value.
+- [[zlnext]]zlnext -- An index that can have length with data following or
+  immediate integer data, much like <<RdbLength>>.  The opcode prefix expands
+  from 0xc0 to 0xf0, to 0xff.  The first three are lengths of various bit
+  widths (0x00, 0x40, 0x80), the rest are immediate integers.
+- [[zlprev]]zlprev -- A length in bytes to skip to the previous list element.
+  This is a simplier coding than zlnext.  The 0xff value ends the <<ZipList>>,
+  the 0xfe prefixes a 32 bit length, and anything less than 0xfe is a length
+  literal (the code 0x10 would be the length 16).
+  . 0xff  -- The end of the zip list
+  . 0xfe  -- 32 bits little endian length
+  . 0x00  -> 0xfd -- 8 bits length, range 0 -> 253
+
+The complicated part of a <<ZipList>> encoding is the <<zlnext>> link.  It has
+9 codes, 3 length codes and 6 immediate integer codes.  The length codes are
+the same as the <<RdbLength>> methods, except that 64 bit lengths are not
+possible.  The immediate integers are expanded with more prefix codes and more
+bit lengths.
+
+--------------------------------------
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+A |0 0 . . . . . .|      6 bit length
+B |0 1 . . . . . . . . . . . . . .|  14 bit length
+C |1 0 0 0 0 0 0 0 . . . 32 bit length . . . . . . . . . . . . ...>
+D |1 1 0 0 0 0 0 0 . . . 16 bit immediate int  . .|
+E |1 1 0 1 0 0 0 0 . . . 32 bit immediate int  . . . . . . . . ...>
+F |1 1 1 0 0 0 0 0 . . . 64 bit immediate int  . . . . . . . . ...>
+G |1 1 1 1 0 0 0 0 . . . 24 bit immediate int  . . . . . . . . . .|
+H |1 1 1 1 1 1 1 0 . . . . . . . .|  8 bit immediate int
+I |1 1 1 1 . . . .|      4 bit immediate int
+J |1 1 1 1 1 1 1 1|      List terminator
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+--------------------------------------
+
+A. 0x00 -- Length encoded in 6 bits, range 0 -> 63.
+  [ 0x00 -> 0x3f ]
+B. 0x40 -- Length encoded in 14 bits, big endian, range 0 -> 16383.
+  [ 0x4000 -> 0x7fff ]
+C. 0x80 -- Length encoded in 32 bits, big endian, range 0 -> 4G.
+  [ 0x80 32bits -> 0x80 32bits ]
+D. 0xc0 -- Immediate integer 16 bits, little endian, range -32K -> 32K-1.
+  [ 0xc0 0000 -> 0xc0 ffff ]
+E. 0xd0 -- Immediate integer 32 bits, little endian, range -2G -> 2G-1.
+  [ 0xd0 32bits -> 0xd0 32bits ]
+F. 0xe0 -- Immediate integer 64 bits, little endian, range -2^63 -> 2^63-1.
+  [ 0xe0 64bits -> 0xe0 64bits ]
+G. 0xf0 -- Immediate integer 24 bits, little endian, range -8M -> 8M-1.
+  [ 0xf0 24bits -> 0xf0 24bits ]
+H. 0xfe -- Immediate integer 8 bits, range -128 -> 127.
+  [ 0xfe 00 -> 0xfe ff ]
+I. 0xf1 -> 0xfd -- Immediate int 4 bits, unsigned, subtract 1, range 0 -> 12.
+  [ 0xf1 -> 0xfd ]
+J. 0xff -- Terminates the list.
+
+[[HASH_ZIPLIST]]
+An example of HASH_ZIPLIST coding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+--------------------------------------
+$ redis-cli hset h one 1 two 2
+(integer) 2
+$ redis-cli dump h | xxd
+00000000: 0d19 1900 0000 1600 0000 0400 0003 6f6e  ..............on
+          A B  C         D         E    F G
+00000010: 6505 f202 0374 776f 05f3 ff09 00fc c2a6  e....two........
+            H  I J  K         L M  N O    P
+00000020: e0a1 0f9b 650a                           ....e.
+--------------------------------------
+
+A. 0x0d -- A HASH_ZIPLIST <<RdbType>>.
+B. 0x19 -- The <<RdbLength>> is 25, or including the {E}.
+C. 0x19000000 -- The <<zlbytes>>, the 32 bit length of the <<ZipList>> data.
+D. 0x16000000 -- The <<ztail>>, the 32 bit offset to the trailing element,
+   which is the postion {L} above.
+E. 0x0400 -- The <<zllen>>, a 16 bit count of elements in the <<ZipList>>.
+F. 0x00 -- The first <<zlprev>> link, always null.
+G. 0x03 6f 6e 65 -- The <<zlnext>> length 3, and the "one" data that follows.
+H. 0x05 -- The <<zlprev>> length 5, which points to {F}.
+I. 0xf2 -- The <<zlnext>> immediate integer 1 (0xf2 - 0xf1 = 1).
+J. 0x02 -- The <<zlprev>> length 2, whiich points to {H}.
+K. 0x03 74 77 6f -- The <<zlnext>> length 3, and the "two" data that follows.
+L. 0x05 -- The <<zlprev>> length 5, which points to {J}.
+M. 0xf3 -- The <<zlnext>> immediate integer 2 (0xf3 - 0xf1 = 2).
+N. 0xff -- The <<zlprev>> field terminating the list.
+O. 0x09 00 -- The Rdb version.
+P. 0xfc ... 0a -- The CRC64 checksum, with a newline from redis-cli.
+
+Any <<ZipList>> coded type will result in the same structure as above.  The
+only difference would be how the list elements are interpretted.  In the
+HASH_ZIPLIST case the list element pairs are used to construct the fields and
+values.  In the ZSET_ZIPLIST case, the list element pairs are used to construct
+the members and the scores.
+
+[[QuickList]]
+Quick List
+----------
+
+A <<QuickList>> is an array of <<ZipList>>.  This is only used for coding the
+LIST_QUICKLIST data type.
+
+[[LIST_QUICKLIST]]
+An example of LIST_QUICKLIST coding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+--------------------------------------
+$ redis-cli rpush l string 2
+(integer) 2
+$ redis-cli dump l | xxd
+00000000: 0e01 1515 0000 0012 0000 0002 0000 0673  ...............s
+          A B  C D         E         F    G  H
+00000010: 7472 696e 6708 f3ff 0900 5e42 7039 fa1a  tring.....^Bp9..
+                      I  J K  L    M
+00000020: 7c28 0a                                  |(.
+--------------------------------------
+
+A. 0xe0 -- A LIST_QUICKLIST <<RdbType>>.
+B. 0x01 -- A <<RdbLength>>, indicating an array of one <<ZipList>>.
+C. 0x15 -- A <<RdbLength>>, the length of the <<ZipList>> data.
+D. 0x15000000 -- The <<zlbytes>>, a 32 bit length data size, little endian.
+E. 0x12000000 -- The <<zltail>>, a 32 bit offset to the trailing element,
+   little endian, which points to position 0x15 above, labeled with an I.
+F. 0x0200 -- The <<zllen>>, a 16 bit count of elements in the <<ZipList>>,
+   little endian.
+G. 0x00 -- The first <<zlprev>> link, always null.
+H. 0x06 73 74 72 69 6e 67 -- The <<zlnext>> field and "string" data.
+I. 0x08 -- The <<zlprev>> length, subtract from current position to go to the
+   previous item.
+J. 0xf3 -- The <<zlnext>> field coding the number 2 (0xf3 - 0xf1 = 2)
+K. 0xff -- The <<zlprev>> field terminating the list.
+L. 0x09 00 -- The Rdb version.
+M. 0x5e ... 0a -- The CRC64 checksum, with a newline from redis-cli.
+
+[[ListPack]]
+List Pack
+---------
+
+This structure is a quite similar to <<ZipList>>, but has slight tweaks in the
+coding of the links and slightly different bit prefixes and widths.  The
+<<ListPack>> is only used to encode parts of the *Redis* STREAM data type.
+
+The <<ListPack>> header does not have a tail offset like the <<ZipList>> does
+because the linking methods allow the program to determine the back 
+from the size of the data.
+
+--------------------------------------
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  lpbytes size, 4 bytes                                        |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  lplen entry count, 2 bytes   |    lpnext     |    optional ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     data         |    lpback     |    lpnext     |    optional ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     data         |    lpback     |    0xff       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+--------------------------------------
+
+- [[lpbytes]]lpbytes -- The length in bytes of the list, including header.
+- [[lplen]]lplen -- The count of elements in the list, which is valid up to the
+  maximum 16 bit value.
+- [[lpnext]]lpnext -- An index that can have length with data following or
+  immediate integer data, much like <<RdbLength>> and <<ZipList>>.  The opcode
+  prefix expands like those codes do, with different meanings.
+- [[lpback]]lpback -- An offset to the previous <<lpnext>> code.  It uses the
+  same expanding prefix.
+
+Like the <<ZipList>>, the magic in this coding is the <<lpnext>> code.  One
+difference with the other codes is that the first code, {A} below, encodes an
+unsigned immediate integer.  All of the other codings for immediate integer are
+signed, where the most significant bit of the code is sign extended.  For
+example, using the coding method {C} below, the value 0xdffff is decoded as -1;
+It is the prefix 0xc0 followed by the big endian integer, 0x1fff - 8192 = -1.
+
+--------------------------------------
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+A |0 . . . . . . .|      7 bit immediate int, unsigned
+B |1 0 . . . . . .|      6 bit length
+C |1 1 0 . . . . . . . . . . . . .|    13 bit immediate int
+D |1 1 1 0 . . . . . . . . . . . .|    12 bit length
+E |1 1 1 1 0 0 0 0 . . . 32 bit length . . . . . . . . . . . . ...>
+F |1 1 1 1 0 0 0 1 . . . 16 bit immediate int  . .| 
+G |1 1 1 1 0 0 1 0 . . . 24 bit immediate int  . . . . . . . . . .|
+H |1 1 1 1 0 0 1 1 . . . 32 bit immediate int  . . . . . . . . ...>
+I |1 1 1 1 0 1 0 0 . . . 64 bit immediate int  . . . . . . . . ...>
+J |1 1 1 1 1 1 1 1|      List terminator
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+--------------------------------------
+
+A. 0x00 -- Immediate unsigned integer in 7 bits, range 0 -> 127.
+  [ 0x00 -> 0x3f ]
+B. 0x80 -- Length encoded in 6 bits, range 0 -> 63.
+  [ 0x80 -> 0xbf ]
+C. 0xc0 -- Immediate integer encoded in 13 bits, big endian, range -4096 ->
+   4095.
+  [ 0xc000 -> 0xdfff ]
+D. 0xe0 -- Length encoded in 12 bits, big endian, range 0 -> 4095.
+  [ 0xe000 -> 0xe0fff ]
+E. 0xf0 -- Length encoded in 32 bits, big endian, range 0 -> 4G-1.
+  [ 0xf0 32bits -> 0xf0 32bits ]
+F. 0xf1 -- Immediate integer encoded in 16 bits, little endian, range -32K ->
+   32K-1.
+  [ 0xf1 0000 -> 0xf1 ffff ]
+G. 0xf2 -- Immediate integer encoded in 24 bits, little endian, range -8M ->
+   8M-1.
+  [ 0xf2 24bits -> 0xf2 24bits ]
+H. 0xf3 -- Immediate integer encoded in 32 bits, little endian. range -2G ->
+   2G-1.
+  [ 0xf3 32bits -> 0xf3 32bits ]
+I. 0xf4 -- Immediate integer encoded in 64 bits, little endian, range -2^63 ->
+   2^63-1.
+  [ 0xf4 64bits -> 0xf4 64bits ]
+J. 0xff -- The list terminator.
+
+The prefixes 0xf5 through 0xfe are not used.
+
+[[STREAM_LISTPACK]]
+An example of STREAM_LISTPACK coding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The structure of a STREAM_LISTPACK contains more than a <<ListPack>> container.
+It also has a list of groups, consumers, and pending entry lists (PELs).  To
+simplify, this example only has the basic stream elements, with two entries
+encoded.
+
+--------------------------------------
+$ redis-cli xadd str '*' loc mel temp 23                                 
+"1581661705262-0"
+$ redis-cli xadd str '*' loc sfo temp 10                                 
+"1581661738846-0"
+$ redis-cli xrange str - +                                               
+1) 1) "1581661705262-0"
+   2) 1) "loc"
+      2) "mel"
+      3) "temp"
+      4) "23"
+2) 1) "1581661738846-0"
+   2) 1) "loc"
+      2) "sfo"
+      3) "temp"
+      4) "10"
+$ redis-cli dump str | xxd                                               
+00000000: 0f01 1000 0001 7042 6254 2e00 0000 0000  ......pBbT......
+          A B  C D  
+00000010: 0000 003b 3b00 0000 1200 0201 0001 0201  ...;;...........
+                 E  F         G    H    I    J  
+00000020: 836c 6f63 0484 7465 6d70 0500 0102 0100  .loc..temp......
+          K           L              ^    ^    ^
+00000030: 0100 0183 6d65 6c04 1701 0501 0201 f230  ....mel........0
+            ^    ^            ^    ^    ^    ^
+00000040: 8300 0400 0183 7366 6f04 0a01 0501 ff02  ......sfo.......
+                 ^    ^            ^    ^    M
+00000050: 8100 0001 7042 62d7 5e00 0009 008f ddcc  ....pBb.^.......
+00000060: c2a8 a27f 070a                           ......
+--------------------------------------
+
+A. 0x0f -- The <<RdbType>> STREAM_LISTPACK
+B. 0x01 -- A <<RdbLength>>, the length 1, which is the number of blocks that
+   contain a Stream Key and a <<ListPack>>.
+C. 0x10 -- A <<RdbLength>>, the length 16, which is the size of the Stream
+   Key.
+D. 0x000001704262542e 0x0000000000000000 -- The Stream Key, which is composed
+   of a millisecond UTC timestamp and a serial number.  This is stored in
+   big-endian format.  The value is the first key added to the stream above:
+   "1581661705262-0"  The other keys in this ListPack are codes as offsets
+   to this key.
+E. 0x3b -- A <<RdbLength>>, the length of the <<ListPack>>.
+F. 0x3b000000 -- The <<lpbytes>> field of the <<ListPack>>.
+G. 0x1200 -- The <<lplen>> field of the <<ListPack>>, the count of items
+   encoded, which is 18 in this case.
+H. 0x02 0x01 -- <<lpnext>> and <<lpback>>, immediate int code 2.
+I. 0x00 0x01 -- <<lpnext>> and <<lpback>>, immediate int code 0.
+J. 0x02 0x01 -- <<lpnext>> and <<lpback>>, immediate int code 2.
+K. 0x83 6c 6f 63 04 -- <<lpnext>> and <<lpback>>, encoding a 3 byte length of
+   the string "loc", the first field in the stream.
+L. 0x84 74 65 6d 70 05 -- <<lpnext>> and <<lpback>>, encoding a 4 byte length
+   of the string "temp", the second field in the stream.
+M. more of the same, 0xff terminates the <<ListPack>>.
+
+There are lots of elements in the list which are meta data about the stream
+rather than the stream field values.  The header of the stream contains the
+fields that are used in the first record of the stream.  For each additional
+entry in the stream, these fields can be referenced and omitted in the record,
+to avoid repeating the same field names.
+
+The header of this <<ListPack>> block contains, starting at {H} above:
+
+- 2 -- Entry count, number of stream entries
+- 0 -- Deleted count, number of stream entries deleted
+- 2 -- Master field count
+- "loc" -- Master field number 1
+- "temp" -- Master field number 2
+- 0 -- Terminates the back links to allow traversing in reverse.
+
+The entries in the stream follow the header, starting at {T} above:
+
+- 2 -- The flags, 2 means that the master fields in the header are used.
+- 0 -- The millisecond offset from the first key, in {D} above
+  "1581661705262-0".
+- 0 -- The serial offset from the first key.
+- "mel" -- The value of the first field.
+- 23 -- The value of the second field.
+- 5 -- List back count, number of list elements to skip for this entry.
+
+The second entry, starting at {d} above:
+
+- 2 -- The flags.
+- 33584 -- The millisecond offset from the first key, in {D} above, adding this
+  to that arrives at the second key, "1581661738846-0".
+- 0 -- The serial offset from the first key.
+- "sfo" -- The value of the first field.
+- 10 -- The value of the second field.
+- 5 -- List back count.
+
+After the end of the <<ListPack>> codes, there are more <<RdbLength>> encoded
+numbers:  a count, for the number of stream records, the last id used, and the
+number of consumer groups.  *Important Note*:  These are encoded as lengths
+since the immediate integers in the <<RdbLength>> method are limited to 32 bits
+and 64 bits are needed for these.  If there are some groups, then all of the
+groups, consumers, and pending entry lists are appended, but they don't use the
+<<ListPack>> structure, that is used only by the stream record entries.
+
+--------------------------------------
+00000040: 8300 0400 0183 7366 6f04 0a01 0501 ff02  ......sfo.......
+                                               A
+00000050: 8100 0001 7042 62d7 5e00 0009 008f ddcc  ....pBb.^.......
+          B                     C  D E    F
+00000060: c2a8 a27f 070a                           ......
+--------------------------------------
+
+A. 0x02 -- <<RdbLength>> immediate integer 2, the number of stream records
+B. 0x81 00000170 4262d75e -- <<RdbLength>> immediate 64 bit UTC milliseconds
+   of the last id used.
+C. 0x00 -- <<RdbLength>> immediate serial number of the last id used.
+D. 0x00 -- <<RdbLength>>, the number of groups attached to this stream.
+L. 0x09 00 -- The Rdb version.
+M. 0x8f ... 0a -- The CRC64 checksum, with a newline from redis-cli.
+
