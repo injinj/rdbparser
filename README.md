@@ -31,6 +31,7 @@ loading and constructing [Redis](https://github.com/antirez/redis) Rdb files.
 Here are some usage examples:
 
 1. Display the contents of a Rdb database dump in json format:
+
 ```console
 $ redis-cli xadd stream '*' loc mel temp 23
 "1582154892743-0"
@@ -52,6 +53,7 @@ $ sudo rdbp -f /var/lib/redis/dump.rdb -e stream
 ```
 
 2. Display the contents of a dump command, from redis-cli:
+
 ```console
 $ redis-cli hset hash aaa 10 bbb 20 ccc 30 hello world
 (integer) 4
@@ -67,6 +69,7 @@ $ redis-cli dump hash | rdbp
 ```
 
 3. List the keys in a saved rdb.
+
 ```console
 $ redis-cli save
 OK
@@ -76,22 +79,23 @@ hash
 ```
 
 4. Use restore command to insert dumped data into a running instance:
+
 ```console
-#
-# oops, deleted my keys accidentally
-#
+
+# deleted my keys accidentally
+
 $ redis-cli del stream hash
 (integer) 2
-#
+
 # restore keys from saved rdb
-#
+
 $ sudo rdbp -f /var/lib/redis/dump.rdb -r | redis-cli --pipe
 All data transferred. Waiting for the last reply...
 Last reply received from server.
 errors: 0, replies: 2
-#
+
 # check that my keys are alive again
-#
+
 $ redis-cli dump stream | rdbp
 {
 "stream" : {
@@ -117,18 +121,18 @@ $ redis-cli dump hash | rdbp
 ## Build or Install on Fedora / CentOS
 
 ```console
-#
+
 # Install packages needed to build and install it
-#
+
 $ sudo dnf install make gcc-c++ chrpath pcre2-devel liblzf-devel rpm-build
-#
+
 # Get the source
-#
+
 $ git clone https://www.github.com/injinj/rdbparser
 $ cd rdbparser
-#
+
 # Build stuff, rdbp is usable without installing
-#
+
 $ make
 $ ./FC30_x86_64/bin/rdbp -h
 ./FC30_x86_64/bin/rdbp [-e pat] [-v] [-i] [-f file]
@@ -141,14 +145,14 @@ $ ./FC30_x86_64/bin/rdbp -h
    -r      : write restore commands for | redis-cli --pipe
 default is to print json of matching data
 if no file is given, will read data from stdin
-#
+
 # Install the rpm, which has bins, libs, include
-#
+
 $ make dist_rpm
 $ sudo rpm -i rpmbuild/RPMS/x86_64/rdbparser-1.0.0-1.fc30.x86_64.rpm
-#
+
 # Show where the files are installed
-#
+
 $ rpmquery -ql rdbparser
 /usr/bin/rdbp
 /usr/include/rdbparser
@@ -165,13 +169,84 @@ $ rpmquery -ql rdbparser
 /usr/lib64/librdbparser.so
 /usr/lib64/librdbparser.so.1.0
 /usr/lib64/librdbparser.so.1.0.0-1
-#
+
 # Uninstall / erase rdbparser files
-#
+
 $ sudo rpm -e rdbparser
 ```
 
 ## Build or Install on Ubuntu / Debian
 
-Todo. liblzf-dev is not a package in Debian.
+Go here: https://github.com/injinj/lzf and install that.
+
+```console
+
+# Install packages needed to build and install it
+
+$ sudo apt-get install make g++ gcc chrpath libpcre2-dev devscripts
+
+# Get the source
+
+$ git clone https://www.github.com/injinj/rdbparser
+$ cd rdbparser
+
+# Build stuff, rdbp is usable without installing
+
+$ make
+$ ./DEB9_x86_64/bin/rdbp -h                                                
+./DEB9_x86_64/bin/rdbp [-e pat] [-v] [-i] [-f file]
+   -e pat  : match key with glob pattern
+   -v      : invert key match
+   -i      : ignore key match case
+   -f file : dump rdb file to read
+   -m      : show meta data in json output
+   -l      : list keys which match
+   -r      : write restore commands for | redis-cli --pipe
+default is to print json of matching data
+if no file is given, will read data from stdin
+
+# Install the rpm, which has bins, libs, include
+
+$ make dist_dpkg
+$ sudo dpkg -i dpkgbuild/rdbparser_1.0.0-1_amd64.deb
+
+# Try it
+
+$ redis-cli set k 'hello world'
+OK
+$ redis-cli dump k | rdbp
+{
+"string" : "hello world"
+}
+
+# Show where the files are installed
+
+$ dpkg -L rdbparser
+/.
+/usr
+/usr/bin
+/usr/bin/rdbp
+/usr/include
+/usr/include/rdbparser
+/usr/include/rdbparser/glob_cvt.h
+/usr/include/rdbparser/rdb_decode.h
+/usr/include/rdbparser/rdb_json.h
+/usr/include/rdbparser/rdb_pcre.h
+/usr/include/rdbparser/rdb_restore.h
+/usr/lib
+/usr/lib/librdbparser.a
+/usr/lib/librdbparser.so.1.0.0-1
+/usr/share
+/usr/share/doc
+/usr/share/doc/rdbparser
+/usr/share/doc/rdbparser/changelog.Debian.gz
+/usr/share/doc/rdbparser/copyright
+/usr/lib/librdbparser.so
+/usr/lib/librdbparser.so.1.0
+
+# Uninstall / erase rdbparser files
+
+$ sudo dpkg -r rdbparser
+
+```
 
