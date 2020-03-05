@@ -70,25 +70,53 @@ struct ListOutput : public RdbOutput {
 };
 
 /* buffer for stdin input */
-static uint8_t      big_buf[ 10 * 1024 * 1024 ];
-static const size_t big_buf_size = sizeof( big_buf );
+static uint8_t big_buf[ 10 * 1024 * 1024 ],
+             * input_buf = big_buf;
+static size_t  input_off,
+               input_buf_size = sizeof( big_buf );
+static bool    input_eof = true;
 
-static size_t
-fill_buf_stdin( size_t off,  bool &is_eof )
+static void
+fill_buf_stdin( void )
 {
   for (;;) {
-    size_t n = fread( &big_buf[ off ], 1, big_buf_size - off, stdin );
+    size_t n = fread( &input_buf[ input_off ], 1,
+                      input_buf_size - input_off, stdin );
     if ( n == 0 ) {
-      is_eof = true;
-      break;
+      input_eof = true;
+      return;
     }
-    off += n;
-    if ( off == big_buf_size ) {
-      is_eof = false;
-      break;
+    input_off += n;
+    if ( input_off == input_buf_size ) {
+      /* if not an rdb file, is a dump, read it all */
+      if ( input_eof && ::memcmp( input_buf, "REDIS00", 7 ) != 0 ) {
+#if 0
+        if ( input_buf_size > 512 * 1024 * 1024 + 1024 ) {
+          max redis object size, too large of an object !!
+        }
+#endif
+        /* increase buf size */
+        if ( input_buf == big_buf ) {
+          input_buf = (uint8_t *) ::malloc( input_buf_size * 2 );
+          if ( input_buf == NULL )
+            break;
+          ::memcpy( input_buf, big_buf, input_buf_size );
+        }
+        else {
+          input_buf = (uint8_t *) ::realloc( input_buf, input_buf_size * 2 );
+          if ( input_buf == NULL )
+            break;
+        }
+        input_buf_size *= 2;
+      }
+      else {
+        input_eof = false;
+        return;
+      }
     }
   }
-  return off;
+  ::perror( "malloc" );
+  exit( 1 );
 }
 
 static const char *
@@ -125,12 +153,9 @@ main( int argc, char *argv[] )
     return 0;
   }
 
-  RdbDecode       decode;
-  PcreFilter      pcre_filter( decode );
-  const uint8_t * buf = big_buf;
-  void          * map = NULL;
-  size_t          off;
-  bool            is_eof; /* is there more input on stdin */
+  RdbDecode  decode;
+  PcreFilter pcre_filter( decode );
+  void     * map = NULL;
 
   /* set up key filter */
   if ( glob != NULL ) {
@@ -156,25 +181,24 @@ main( int argc, char *argv[] )
       ::close( fd );
       return 1;
     }
-    off = st.st_size;
-    map = ::mmap( 0, off, PROT_READ, MAP_SHARED, fd, 0 );
+    input_off = st.st_size;
+    map = ::mmap( 0, input_off, PROT_READ, MAP_SHARED, fd, 0 );
     if ( map == MAP_FAILED ) {
       ::perror( "mmap" );
       ::close( fd );
       return 1;
     }
     ::close( fd );
-    if ( ::madvise( map, off, MADV_SEQUENTIAL ) != 0 )
+    if ( ::madvise( map, input_off, MADV_SEQUENTIAL ) != 0 )
       ::perror( "madvise" );
-    buf = (const uint8_t *) map;
-    is_eof = true;
+    input_buf = (uint8_t *) map;
   }
   /* load stdin buffer */
   else {
-    off = fill_buf_stdin( 0, is_eof );
+    fill_buf_stdin();
   }
 
-  RdbBufptr     bptr( buf, off );
+  RdbBufptr     bptr( input_buf, input_off );
   JsonOutput    json_out( decode );
   ListOutput    list_out( decode );
   RestoreOutput rest_out( decode, bptr, true );
@@ -200,7 +224,7 @@ main( int argc, char *argv[] )
         goto break_loop;
       decode.data_out->d_finish( false );
       fprintf( stderr, "%s\n", get_err_description( err ) );
-      show_error( bptr, big_buf, &big_buf[ off ] );
+      show_error( bptr, input_buf, &input_buf[ input_off ] );
       return 1;
     }
     decode.key_cnt++;
@@ -210,12 +234,14 @@ main( int argc, char *argv[] )
     if ( decode.data_out == &rest_out )
       rest_out.write_restore_cmd();
     /* fill more buffer from stdin */
-    if ( ! is_eof && bptr.avail < big_buf_size / 2 ) {
-      ::memmove( big_buf, bptr.buf, bptr.avail );
-      bptr.buf          = big_buf;
-      bptr.start_offset = bptr.offset;
-      bptr.offset       = 0;
-      bptr.avail        = fill_buf_stdin( bptr.avail, is_eof );
+    if ( ! input_eof && bptr.offset > input_buf_size / 2 ) {
+      ::memmove( input_buf, bptr.buf, bptr.avail );
+      bptr.buf           = input_buf;
+      bptr.start_offset += bptr.offset;
+      input_off          = bptr.avail;
+      bptr.offset        = 0;
+      fill_buf_stdin();
+      bptr.avail         = input_off;
     }
     if ( bptr.avail == 0 ) /* no data left */
       break;
@@ -223,6 +249,8 @@ main( int argc, char *argv[] )
 break_loop:;
   decode.data_out->d_finish( true );
   if ( map != NULL )
-    ::munmap( map, off );
+    ::munmap( map, input_off );
+  else if ( input_buf != big_buf )
+    ::free( input_buf );
   return 0;
 }

@@ -25,6 +25,16 @@ endif
 CC          ?= gcc
 CXX         ?= $(CC) -x c++
 cpp         := $(CXX)
+# if not linking libstdc++
+ifdef NO_STL
+cppflags    := -std=c++11 -fno-rtti -fno-exceptions
+cpplink     := $(CC)
+else
+cppflags    := -std=c++11
+cpplink     := $(CXX)
+endif
+#cppflags  := -fno-rtti -fno-exceptions -fsanitize=address
+#cpplink   := $(CC) -lasan
 arch_cflags := -fno-omit-frame-pointer
 gcc_wflags  := -Wall -Wextra -Werror
 fpicflags   := -fPIC
@@ -47,12 +57,6 @@ INCLUDES   ?= -Iinclude
 DEFINES    ?=
 includes   := $(INCLUDES)
 defines    := $(DEFINES)
-
-cppflags   := -std=c++11
-#cppflags   := -std=c++11 -fno-rtti -fno-exceptions
-#cppflags  := -fno-rtti -fno-exceptions -fsanitize=address
-#cpplink   := $(CC) -lasan
-cpplink    := $(CXX)
 
 rpath      := -Wl,-rpath,$(pwd)/$(libd)
 cpp_lnk    :=

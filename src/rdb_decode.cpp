@@ -894,10 +894,13 @@ RdbDecode::decode_stream( RdbBufptr &bptr ) noexcept
       for ( size_t i = 0; i < entry.items_count; i++ ) {
         if ( ! entry.read_entry( list, lval ) )
           return RDB_ERR_TRUNC;
-        if ( entry.num == 0 )
-          this->out->d_stream_start( RdbOutput::STREAM_ENTRY_LIST );
-        this->out->d_stream_entry( entry );
-        entry.num++;
+        /* skip deleted entries */
+        if ( ( entry.flags & RDB_STREAM_ENTRY_DELETED ) == 0 ) {
+          if ( entry.num == 0 )
+            this->out->d_stream_start( RdbOutput::STREAM_ENTRY_LIST );
+          this->out->d_stream_entry( entry );
+          entry.num++;
+        }
       }
     }
   }
