@@ -336,11 +336,12 @@ directions between them.  It is used by many of the data types in *Redis*.
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 --------------------------------------
 
-- [[zlbytes]]zlbytes -- The length in bytes of the list, including header.
-- [[zltail]]zltail   -- The offset to the last element in the list for
-  traversing in reverse.
+- [[zlbytes]]zlbytes -- The 32 bit length in bytes of the list, including
+  header, in little endian.
+- [[zltail]]zltail   -- The 32 bit offset to the last element in the list for
+  traversing in reverse, in little endian.
 - [[zllen]]zllen   -- The count of elements in the list, which is valid up to
-  the maximum 16 bit value.
+  the maximum 16 bit value, little endian.
 - [[zlnext]]zlnext -- An index that can have length with data following or
   immediate integer data, much like <<RdbLength>>.  The opcode prefix expands
   from 0xc0 to 0xf0, to 0xff.  The first three are lengths of various bit
@@ -412,7 +413,7 @@ $ redis-cli dump h | xxd
 --------------------------------------
 
 A. 0x0d -- A HASH_ZIPLIST <<RdbType>>.
-B. 0x19 -- The <<RdbLength>> is 25, or including the {E}.
+B. 0x19 -- The <<RdbLength>> is 25, data length from {C} to {O}.
 C. 0x19000000 -- The <<zlbytes>>, the 32 bit length of the <<ZipList>> data.
 D. 0x16000000 -- The <<ztail>>, the 32 bit offset to the trailing element,
    which is the postion {L} above.
@@ -459,7 +460,7 @@ $ redis-cli dump l | xxd
 
 A. 0xe0 -- A LIST_QUICKLIST <<RdbType>>.
 B. 0x01 -- A <<RdbLength>>, indicating an array of one <<ZipList>>.
-C. 0x15 -- A <<RdbLength>>, the length of the <<ZipList>> data.
+C. 0x15 -- A <<RdbLength>>, the length of the <<ZipList>> data from {D} to {L}.
 D. 0x15000000 -- The <<zlbytes>>, a 32 bit length data size, little endian.
 E. 0x12000000 -- The <<zltail>>, a 32 bit offset to the trailing element,
    little endian, which points to position 0x15 above, labeled with an I.
@@ -500,14 +501,29 @@ from the size of the data.
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 --------------------------------------
 
-- [[lpbytes]]lpbytes -- The length in bytes of the list, including header.
+- [[lpbytes]]lpbytes -- The length in bytes of the list, including header,
+  a 32 bit value stored in little endian format.
 - [[lplen]]lplen -- The count of elements in the list, which is valid up to the
-  maximum 16 bit value.
+  maximum 16 bit value, stored in little endian fromat.
 - [[lpnext]]lpnext -- An index that can have length with data following or
   immediate integer data, much like <<RdbLength>> and <<ZipList>>.  The opcode
   prefix expands like those codes do, with different meanings.
-- [[lpback]]lpback -- An offset to the previous <<lpnext>> code.  It uses the
-  same expanding prefix.
+- [[lpback]]lpback -- An offset to the previous <<lpnext>> code.  This uses
+  big endian format with the 0x80 bit used to signal the end of the code.
+
+The lpback code is used to traverse the list from back to front.  The last code
+has the 0x80 bit clear so that a back to front traversal eats bytes and
+accumulates the size while the 0x80 bit is set.  The forward traversal skips
+over this coding by calculating the number of 7 bit numbers needed to code the
+element size, which is the size of the lpnext code and the optional data.  For
+example, the size 500 is represented as 0x03 0xf4 or
+
+  0x03f4 : 3 * 128 + 0x74 == 384 + 116 == 500.
+
+The 0x80 bit in 0xf4 is masked to produce 0x74.  The size 32000 is
+represented as 0x1 0xfa 0x80 or
+
+  0x01fa80 : 1 * 128 * 128 + 0x7a * 128 + 0 == 16384 + 15616 == 32000.
 
 Like the <<ZipList>>, the magic in this coding is the <<lpnext>> code.  One
 difference with the other codes is that the first code, {A} below, encodes an

@@ -214,8 +214,7 @@ RdbListPack::next( RdbListValue &lval ) const noexcept
       return false;
 
     uint8_t         sz   = lp_size( n );
-    const uint8_t * next = &lval.entry[ sz ],
-                  * back;
+    const uint8_t * next = &lval.entry[ sz ];
     if ( next <= this->end ) { /* if is immediate integer */
       lval.ival = lp_val( n, lval.entry );
       if ( is_immed( n ) ) {
@@ -227,11 +226,7 @@ RdbListPack::next( RdbListValue &lval ) const noexcept
         lval.data_len  = (size_t) lval.ival;
       }
       /* the back code, add to entry_len to skip it */
-      back = &lval.entry[ lval.entry_len ];
-      if ( back < this->end ) {
-        ListPackEnc b   = lp_code( back[ 0 ] );
-        lval.entry_len += lp_size( b );
-      }
+      lval.entry_len += lpback_size( lval.entry_len );
     }
   }
   return &lval.entry[ lval.entry_len ] <= this->end; /* check bounds */
@@ -369,7 +364,7 @@ RdbDecode::decode_hdr( RdbBufptr &bptr ) noexcept
           this->out->d_expired( sec );
           break;
         }
-        case RDB_DBSEELECT: { /* 0xfe - length */
+        case RDB_DBSELECT: { /* 0xfe - length */
           RdbLength sz;
           if ( (err = sz.decode( bptr )) != RDB_OK )
             return err;

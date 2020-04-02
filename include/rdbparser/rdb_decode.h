@@ -1,7 +1,10 @@
 #ifndef __rdbparser__rdb_decode_h__
 #define __rdbparser__rdb_decode_h__
 
+#include <rdbparser/rdb_int.h>
+
 #ifdef __cplusplus
+
 namespace rdbparser {
 /* the redis rdb encoded data types, notes are based on rdb version 9 */
 enum RdbType {
@@ -32,7 +35,7 @@ enum RdbMeta {
   RDB_DBRESIZE    = 0xfb, /* length, length */
   RDB_EXPIRED_MS  = 0xfc, /* millisecond */
   RDB_EXPIRED_SEC = 0xfd, /* second */
-  RDB_DBSEELECT   = 0xfe, /* length */
+  RDB_DBSELECT    = 0xfe, /* length */
   RDB_EOF         = 0xff
 };
 
@@ -170,73 +173,32 @@ struct RdbLength {
     }
     return RDB_LEN_ERR;
   }
+  #define LSZ( v, e ) ( (uint64_t) v << ( (int) e * 4 ) )
+  static const uint64_t LSIZE =
+    LSZ( 1, RDB_LEN_6 )  | /* 0x00 6 bits, 0x3f */
+    LSZ( 2, RDB_LEN_14 ) | /* 0x40 14 bits, 0x3fff (big endian) */
+    LSZ( 5, RDB_LEN_32 ) | /* 0x80 32 bits, big endian */
+    LSZ( 9, RDB_LEN_64 ) | /* 0x81 64 bits, big endian */
+    LSZ( 2, RDB_INT8 )   | /* 0xc0 8 bits */
+    LSZ( 3, RDB_INT16 )  | /* 0xc1 16 bits, little endian */
+    LSZ( 5, RDB_INT32 );   /* 0xc2 32 bits, little endian */
+  #undef LSZ
+  static inline uint8_t len_size( LengthEnc e ) {
+    return ( LSIZE >> ( e * 4 ) ) & 0xfU; /* sizes stored in a u64 constant */
+  }
+  static LengthEnc str_code( uint64_t x ) {
+    if ( ( x & (uint64_t) 0x3fU ) == x )       return RDB_LEN_6;
+    if ( ( x & (uint64_t) 0x3fffU ) == x )     return RDB_LEN_14;
+    if ( ( x & (uint64_t) 0xffffffffU ) == x ) return RDB_LEN_32;
+    return RDB_LEN_64;
+  }
+  static LengthEnc int_code( int64_t x ) {
+    if ( x <= 0x7f && x >= -(int64_t) 0x80 )             return RDB_INT8;
+    if ( x <= 0x7fff && x >= -(int64_t) 0x8000 )         return RDB_INT16;
+    if ( x <= 0x7fffffff && x >= -(int64_t) 0x80000000 ) return RDB_INT32;
+    return RDB_LEN_ERR;
+  }
 };
-
-template<class Int, bool swp> inline Int any_endian( const uint8_t *p ) {
-  Int i;
-  ::memcpy( &i, p, sizeof( Int ) );
-  if ( swp && sizeof( Int ) > 1 ) {
-    if ( sizeof( Int ) == 2 )
-      return __builtin_bswap16( i );
-    if ( sizeof( Int ) == 4 )
-      return __builtin_bswap32( i );
-    return __builtin_bswap64( i );
-  }
-  return i;
-}
-/* le = little endian */
-template<class Int> inline Int le( const uint8_t *p ) { /* little endian */
-#ifdef MACH_IS_BIG_ENDIAN
-  return any_endian<Int, true>( p );
-#else
-  return any_endian<Int, false>( p );
-#endif
-}
-/* be = big endian */
-template<class Int> inline Int be( const uint8_t *p ) { /* big endian */
-#ifdef MACH_IS_BIG_ENDIAN
-  return any_endian<Int, false>( p );
-#else
-  return any_endian<Int, true>( p );
-#endif
-}
-/* unsigned encodings */
-static inline uint64_t l32( const uint8_t *p ) { return le<uint32_t>( p ); }
-static inline uint64_t b32( const uint8_t *p ) { return be<uint32_t>( p ); }
-/* same as unsigned */
-static inline uint64_t s64( const uint8_t *p ) { return le<uint64_t>( p ); }
-
-/* signed little endian encodings, these are used to encode immediate ints
- * sign extend the negative bits out to 64b */
-static inline uint64_t s32( const uint8_t *p ) {
-  return (int64_t) (int32_t) le<uint32_t>( p ); /* sign 32 -> 64 */
-}
-static inline uint64_t s16( const uint8_t *p ) {
-  return (int64_t) (int16_t) le<uint16_t>( p ); /* sign 16 -> 64 */
-}
-static inline uint64_t s24( const uint8_t *p ) {
-  int16_t  top    = (int16_t) (int8_t) p[ 2 ];
-  uint16_t bottom = le<uint16_t>( p );
-  if ( top < 0 ) {
-    uint32_t neg = ~0;
-    return ( (uint64_t) neg << 32 ) | /* sign extend bits */
-             (uint64_t) ( ( (uint32_t) top << 16 ) | (uint32_t) bottom );
-  }
-  return ( (uint32_t) top << 16 ) | (uint32_t) bottom; /* unsigned */
-}
-static inline uint64_t s8( uint8_t i ) {
-  return (uint64_t) (int64_t) (int8_t) i;      /* sign 8 -> 64 */
-}
-static inline uint64_t s13( const uint8_t *p ) { /* big! */
-  if ( ( p[ 0 ] & 0x10 ) != 0 ) { /* if sign bit is set */
-    int32_t  top = (int8_t) 16 - (int8_t) ( p[ 0 ] & 0xf ); /* extend */
-    uint32_t neg = ~0;
-    return ( (uint64_t) neg << 32 ) |
-             (uint64_t) ( ( (uint32_t) top << 8 ) | (uint32_t) p[ 1 ] );
-  }
-  return ( ( (uint16_t) p[ 0 ] << 8 ) | p[ 1 ] ) & 0x1fff; /* unsigned */
-}
-
 
 /* RdbListValue is used for zip list and list pack traversal
  * 
@@ -329,13 +291,24 @@ struct RdbZipList {
   static inline uint8_t zlink_size( ZipLinkEnc e ) {
     return ( ZSIZE >> ( e * 4 ) ) & 0xfU; /* sizes stored in a u64 constant */
   }
+  static ZipLinkEnc znext_str_code( uint64_t x ) {
+    if ( ( x & (uint64_t) 0x3fU ) == x )       return LEN_6;
+    if ( ( x & (uint64_t) 0x3fffU ) == x )     return BIG_14;
+    if ( ( x & (uint64_t) 0xffffffffU ) == x ) return BIG_32;
+    return ZIP_END;
+  }
+  static ZipLinkEnc zprev_code( uint64_t x ) {
+    if ( x < (uint64_t) 0xfeU )                return LEN_8;
+    if ( ( x & (uint64_t) 0xffffffffU ) == x ) return LEN_32;
+    return ZIP_END;
+  }
   /* find encoding for prev, always a length */
   static ZipLinkEnc zlink_prev( uint8_t n ) {
+    if ( n < 0xfe )  /* 8 bit len */
+      return LEN_8;
     if ( n == 0xff ) /* end if list */
       return ZIP_END;
-    if ( n == 0xfe ) /* 0xfe <32> bits little endian */
-      return LEN_32;
-    return LEN_8; /* 8 bit len */
+    return LEN_32;   /* 0xfe <32> bits little endian */
   }
   /* find encoding for next, may be length, may be an immediate integer */
   static ZipLinkEnc zlink_next( uint8_t n ) {
@@ -454,6 +427,30 @@ struct RdbListPack {
   #undef ISZ
   static inline uint8_t lp_size( ListPackEnc e ) {
     return ( LP_SIZE >> ( e * 4 ) ) & 0xfU; /* sizes stored in a u64 constant */
+  }
+  static ListPackEnc lpnext_str_code( uint64_t x ) {
+    if ( ( x & (uint64_t) 0x3fU ) == x )       return LP_6BIT_STR;
+    if ( ( x & (uint64_t) 0xfffU ) == x )      return LP_12BIT_STR;
+    if ( ( x & (uint64_t) 0xffffffffU ) == x ) return LP_32BIT_STR;
+    return LP_END;
+  }
+  static ListPackEnc lpnext_imm_code( int64_t x ) {
+    if ( x <= 0x7f && x >= 0 )                           return LP_7BIT_UINT;
+    if ( x <= 0xfff && x >= -(int64_t) 0x1000 )          return LP_13BIT_INT;
+    if ( x <= 0x7fff && x >= -(int64_t) 0x8000 )         return LP_16BIT_INT;
+    if ( x <= 0x7fffff && x >= -(int64_t) 0x800000 )     return LP_24BIT_INT;
+    if ( x <= 0x7fffffff && x >= -(int64_t) 0x80000000 ) return LP_32BIT_INT;
+    return LP_64BIT_INT;
+  }
+  static uint8_t lpback_size( uint64_t x ) {
+    size_t i = 1;
+    if ( x >= 128 ) {
+      do {
+        i++;
+        x >>= 7;
+      } while ( x >= 128 );
+    }
+    return i;
   }
   static ListPackEnc lp_code( uint8_t b ) {
     switch ( ( b & 0xF0 ) >> 4 ) {
