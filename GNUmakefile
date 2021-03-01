@@ -84,7 +84,7 @@ librdbparser_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(librdbparser_
 librdbparser_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(librdbparser_files))) \
                      $(addprefix $(dependd)/, $(addsuffix .fpic.d, $(librdbparser_files)))
 librdbparser_dlnk  := $(lnk_lib)
-librdbparser_spec  := $(version)-$(build_num)
+librdbparser_spec  := $(version)-$(build_num)_$(git_hash)
 librdbparser_ver   := $(major_num).$(minor_num)
 
 $(libd)/librdbparser.a: $(librdbparser_objs)
