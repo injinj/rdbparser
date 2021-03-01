@@ -13,6 +13,7 @@ BuildRequires:  gcc-c++
 BuildRequires:  chrpath
 BuildRequires:  pcre2-devel
 BuildRequires:  liblzf-devel
+BuildRequires:  git-core
 Requires:       pcre2
 Requires:       liblzf
 Requires(post): /sbin/ldconfig
