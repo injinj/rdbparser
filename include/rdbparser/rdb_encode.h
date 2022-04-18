@@ -49,7 +49,7 @@ struct RdbLenEncode {
 
       case RdbLength::RDB_LEN_32:
         b[ 0 ] = 0x80U;
-        be<uint32_t>( &b[ 1 ], this->len );
+        be<uint32_t>( &b[ 1 ], (uint32_t) this->len );
         return 5;
 
       case RdbLength::RDB_LEN_64:
@@ -86,12 +86,12 @@ struct RdbLenEncode {
 
       case RdbLength::RDB_INT16:
         b[ 0 ] = 0xc1U;
-        le<uint16_t>( &b[ 1 ], this->ival );
+        le<uint16_t>( &b[ 1 ], (uint16_t) this->ival );
         return 3;
 
       case RdbLength::RDB_INT32:
         b[ 0 ] = 0xc2U;
-        le<uint32_t>( &b[ 1 ], this->ival );
+        le<uint32_t>( &b[ 1 ], (uint32_t) this->ival );
         return 5;
 
       default: 

@@ -79,6 +79,7 @@ all_dlls    :=
 all_depends :=
 
 librdbparser_files := rdb_decode rdb_json rdb_restore rdb_pcre
+librdbparser_cfile := $(addprefix src/, $(addsuffix .cpp, $(librdbparser_files)))
 librdbparser_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(librdbparser_files)))
 librdbparser_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(librdbparser_files)))
 librdbparser_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(librdbparser_files))) \
@@ -95,6 +96,7 @@ all_dlls    += $(libd)/librdbparser.so
 all_depends += $(librdbparser_deps)
 
 rdbp_files := rdb_main
+rdbp_cfile := src/rdb_main.cpp
 rdbp_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(rdbp_files)))
 rdbp_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(rdbp_files)))
 rdbp_libs  := $(libd)/librdbparser.a
@@ -108,7 +110,61 @@ all_depends += $(rdbp_deps)
 
 all_dirs := $(bind) $(libd) $(objd) $(dependd)
 
-all: $(all_libs) $(all_dlls) $(all_exes)
+all: $(all_libs) $(all_dlls) $(all_exes) cmake
+
+.PHONY: cmake
+cmake: CMakeLists.txt
+
+.ONESHELL: CMakeLists.txt
+CMakeLists.txt: .copr/Makefile
+	@cat <<'EOF' > $@
+	cmake_minimum_required (VERSION 3.9.0)
+	if (POLICY CMP0111)
+	  cmake_policy(SET CMP0111 OLD)
+	endif ()
+	project (rdbparser)
+	include_directories (
+	  include
+	  $${CMAKE_SOURCE_DIR}/lzf/include
+	)
+	if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+	  add_definitions(/DPCRE2_STATIC)
+	  if ($$<CONFIG:Release>)
+	    add_compile_options (/arch:AVX2 /GL /std:c11)
+	  else ()
+	    add_compile_options (/arch:AVX2 /std:c11)
+	  endif ()
+	  if (NOT TARGET pcre2-8-static)
+	    add_library (pcre2-8-static STATIC IMPORTED)
+	    set_property (TARGET pcre2-8-static PROPERTY IMPORTED_LOCATION_DEBUG ../pcre2/build/Debug/pcre2-8-staticd.lib)
+	    set_property (TARGET pcre2-8-static PROPERTY IMPORTED_LOCATION_RELEASE ../pcre2/build/Release/pcre2-8-static.lib)
+	    include_directories (../pcre2/build)
+	  else ()
+	    include_directories ($${CMAKE_BINARY_DIR}/pcre2)
+	  endif ()
+	  if (NOT TARGET lzf)
+	    add_library (lzf STATIC IMPORTED)
+	    set_property (TARGET lzf PROPERTY IMPORTED_LOCATION_DEBUG ../lzf/build/Debug/lzf.lib)
+	    set_property (TARGET lzf PROPERTY IMPORTED_LOCATION_RELEASE ../lzf/build/Release/lzf.lib)
+	  endif ()
+	else ()
+	  add_compile_options ($(cflags))
+	  if (TARGET pcre2-8-static)
+	    include_directories ($${CMAKE_BINARY_DIR}/pcre2)
+	  endif ()
+	  if (NOT TARGET lzf)
+	    add_library (lzf STATIC IMPORTED)
+	    set_property (TARGET lzf PROPERTY IMPORTED_LOCATION ../lzf/build/liblzf.a)
+	  endif ()
+	endif ()
+	add_library (rdbparser STATIC $(librdbparser_cfile))
+	if (TARGET pcre2-8-static)
+	  link_libraries (rdbparser lzf pcre2-8-static)
+	else ()
+	  link_libraries (rdbparser lzf -lpcre2-8)
+	endif ()
+	add_executable (rdbp $(rdbp_cfile))
+	EOF
 
 # create directories
 $(dependd):

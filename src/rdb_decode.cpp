@@ -2,6 +2,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 extern "C" {
 #include <lzf.h>
 }
@@ -23,7 +25,7 @@ RdbBufptr::decompress(  size_t zlen,  size_t len ) noexcept
     return false;
   list[ 0 ] = (void *) this->alloced_mem;
   ptr = (uint8_t *) &list[ 1 ];
-  if ( lzf_decompress( b, zlen, ptr, len ) == 0 )
+  if ( lzf_decompress( b, (uint32_t) zlen, ptr, (uint32_t) len ) == 0 )
     return false;
   /* push the unconsumed mem after len */
   if ( this->avail > 0 ) {
@@ -279,7 +281,7 @@ RdbDecode::decode_hdr( RdbBufptr &bptr ) noexcept
     if ( this->crc != 0 ) {
       uint64_t calc = jones_crc64( 0, bptr.buf, bptr.avail - off );
       if ( calc != this->crc ) {
-        fprintf( stderr, "calc crc(0x%lx) != trail crc(0x%lx)\n",
+        fprintf( stderr, "calc crc(0x%" PRIx64 ") != trail crc(0x%" PRIx64 ")\n",
                  calc, this->crc );
         if ( ! this->is_rdb_file )
           return RDB_ERR_CRC;
@@ -370,7 +372,7 @@ RdbDecode::decode_hdr( RdbBufptr &bptr ) noexcept
             return err;
           if ( sz.is_lzf || sz.is_enc )
             return RDB_ERR_HDR;
-          this->out->d_dbselect( sz.len );
+          this->out->d_dbselect( (uint32_t) sz.len );
           break;
         }
         case RDB_EOF:
@@ -450,7 +452,7 @@ RdbStreamEntry::read_entry( RdbListPack &list,  RdbListValue &lval ) noexcept
                  cnt = 0,
                  i;
   bool b;
-  b  = list.next_ival( lval ); this->flags    = lval.ival;
+  b  = list.next_ival( lval ); this->flags    = (uint32_t) lval.ival;
   b &= list.next_ival( lval ); this->diff.ms  = lval.ival;
   b &= list.next_ival( lval ); this->diff.ser = lval.ival;
   if ( ! b )
@@ -1077,7 +1079,7 @@ static const char hex_chars[] = "0123456789abcdef";
 struct HexDump {
   char line[ 80 ];
   uint32_t boff, hex, ascii;
-  uint64_t stream_off;
+  size_t stream_off;
 
   HexDump( uint64_t off ) : boff( 0 ), stream_off( off ) {
     this->flush_line();
@@ -1095,7 +1097,7 @@ struct HexDump {
     this->init_line();
   }
   void init_line( void ) {
-    uint64_t j, k = this->stream_off;
+    size_t j, k = this->stream_off;
     ::memset( this->line, ' ', 79 );
     this->line[ 79 ] = '\0';
     this->line[ 5 ] = hex_chars[ k & 0xf ];
@@ -1107,7 +1109,7 @@ struct HexDump {
       k >>= 4;
     }
   }
-  uint32_t fill_line( const void *ptr,  uint64_t off,  uint64_t len ) {
+  size_t fill_line( const void *ptr,  size_t off,  size_t len ) {
     while ( off < len && this->boff < 16 ) {
       uint8_t b = ((uint8_t *) ptr)[ off++ ];
       this->line[ this->hex ]   = hex_chars[ b >> 4 ];

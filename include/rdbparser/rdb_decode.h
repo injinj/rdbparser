@@ -450,7 +450,7 @@ struct RdbListPack {
         x >>= 7;
       } while ( x >= 128 );
     }
-    return i;
+    return (uint8_t) i;
   }
   static ListPackEnc lp_code( uint8_t b ) {
     switch ( ( b & 0xF0 ) >> 4 ) {

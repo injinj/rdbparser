@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <rdbparser/rdb_decode.h>
 #include <rdbparser/rdb_json.h>
 
@@ -12,7 +14,7 @@ rdbparser::print_s( const RdbString &str,  bool use_quotes ) noexcept
 {
   switch ( str.coding ) {
     case RDB_NO_VAL:  printf( "\"nil\"" ); break;
-    case RDB_INT_VAL: printf( "%ld", str.ival ); break;
+    case RDB_INT_VAL: printf( "%" PRId64 "", str.ival ); break;
     case RDB_STR_VAL: {
       char out[ 128 ];
       size_t sz = 0, len = str.s_len;
@@ -69,7 +71,7 @@ comma_nl( uint64_t &cnt )
 void JsonOutput::d_idle( uint64_t i ) noexcept {
   if ( ! this->show_meta ) return;
   comma_nl( this->d_cnt );
-  printf( "\"idle\" : %lu", i );
+  printf( "\"idle\" : %" PRIu64 "", i );
 }
 void JsonOutput::d_freq( uint8_t f ) noexcept {
   if ( ! this->show_meta ) return;
@@ -84,12 +86,12 @@ void JsonOutput::d_aux( const RdbString &var,  const RdbString &val ) noexcept {
 void JsonOutput::d_dbresize( uint64_t i,  uint64_t j ) noexcept {
   if ( ! this->show_meta ) return;
   comma_nl( this->d_cnt );
-  printf( "\"dbresize\" : [%lu, %lu]", i, j );
+  printf( "\"dbresize\" : [%" PRIu64 ", %" PRIu64 "]", i, j );
 }
 void JsonOutput::d_expired_ms( uint64_t ms ) noexcept {
   if ( ! this->show_meta ) return;
   comma_nl( this->d_cnt );
-  printf( "\"expire_ms\" : %lu", ms );
+  printf( "\"expire_ms\" : %" PRIu64 "", ms );
 }
 void JsonOutput::d_expired( uint32_t sec ) noexcept {
   if ( ! this->show_meta ) return;
@@ -264,7 +266,7 @@ void
 JsonOutput::d_stream_entry( const RdbStreamEntry &entry ) noexcept
 { 
   tab( entry.num != 0, ",\n", 2 );
-  printf( "{ \"id\" : \"%lu-%lu\", ", entry.id.ms + entry.diff.ms,
+  printf( "{ \"id\" : \"%" PRIu64 "-%" PRIu64 "\", ", entry.id.ms + entry.diff.ms,
                          entry.id.ser + entry.diff.ser );
   for ( size_t i = 0; i < entry.entry_field_count; i++ ) {
     RdbListValue & f = entry.fields[ i ],
@@ -274,11 +276,11 @@ JsonOutput::d_stream_entry( const RdbStreamEntry &entry ) noexcept
     if ( f.data != NULL )
       printf( "\"%.*s\" : ", (int) f.data_len, (char *) f.data );
     else
-      printf( "\"%ld\" : ", f.ival );
+      printf( "\"%" PRId64 "\" : ", f.ival );
     if ( v.data != NULL )
       printf( "\"%.*s\"", (int) v.data_len, (char *) v.data );
     else
-      printf( "%ld", v.ival );
+      printf( "%" PRId64 "", v.ival );
   }
   printf( " }" );
 }
@@ -286,9 +288,9 @@ JsonOutput::d_stream_entry( const RdbStreamEntry &entry ) noexcept
 void
 JsonOutput::d_stream_info( const RdbStreamInfo &info ) noexcept
 {
-  printf( "  \"last_id\" : \"%lu-%lu\",\n"
-          "  \"num_elems\" : %lu,\n"
-          "  \"num_cgroups\" : %lu",
+  printf( "  \"last_id\" : \"%" PRIu64 "-%" PRIu64 "\",\n"
+          "  \"num_elems\" : %" PRIu64 ",\n"
+          "  \"num_cgroups\" : %" PRIu64 "",
           info.last.ms, info.last.ser,
           info.num_elems, info.num_cgroups );
 }
@@ -360,8 +362,8 @@ JsonOutput::d_stream_group( const RdbGroupInfo &group ) noexcept
 {
   tab( group.num != 0, ",\n", 2 );
   printf( "{ \"group\" : \"%.*s\","
-           " \"pending\" : %lu,"
-           " \"last_id\" : \"%lu-%lu\"",
+           " \"pending\" : %" PRIu64 ","
+           " \"last_id\" : \"%" PRIu64 "-%" PRIu64 "\"",
           (int) group.gname_len, group.gname, group.pending_cnt,
           group.last.ms, group.last.ser );
 }
@@ -370,9 +372,9 @@ void
 JsonOutput::d_stream_pend( const RdbPendInfo &pend ) noexcept
 {
   tab( pend.num != 0, ",\n", 4 );
-  printf( "{ \"id\" : \"%lu-%lu\","
-           " \"last_d\" : %lu,"
-           " \"d_cnt\" : %lu }",
+  printf( "{ \"id\" : \"%" PRIu64 "-%" PRIu64 "\","
+           " \"last_d\" : %" PRIu64 ","
+           " \"d_cnt\" : %" PRIu64 " }",
           pend.id.ms, pend.id.ser, pend.last_delivery, pend.delivery_cnt );
 }
 
@@ -381,8 +383,8 @@ JsonOutput::d_stream_cons( const RdbConsumerInfo &cons ) noexcept
 {
   tab( cons.num != 0, ",\n", 4 );
   printf( "{ \"name\" : \"%.*s\","
-           " \"pending\" : %lu,"
-           " \"last_seen\" : %lu",
+           " \"pending\" : %" PRIu64 ","
+           " \"last_seen\" : %" PRIu64 "",
         (int) cons.cname_len, cons.cname, cons.pend_cnt, cons.last_seen );
 }
 
@@ -390,6 +392,6 @@ void
 JsonOutput::d_stream_cons_pend( const RdbConsPendInfo &pend ) noexcept
 {
   tab( pend.num != 0, ",\n", 5 );
-  printf( "\"%lu-%lu\"", pend.id.ms, pend.id.ser );
+  printf( "\"%" PRIu64 "-%" PRIu64 "\"", pend.id.ms, pend.id.ser );
 }
 

@@ -2,12 +2,17 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <rdbparser/rdb_decode.h>
 #include <rdbparser/rdb_pcre.h>
 #include <rdbparser/glob_cvt.h>
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
 
+#ifdef _MSC_VER
+#define strncasecmp _strnicmp
+#endif
 using namespace rdbparser;
 
 bool
@@ -44,7 +49,7 @@ PcreFilter::set_filter_expr( const char *expr,  size_t expr_len,
       }
     }
     if ( re == NULL ) {
-      fprintf( stderr, "pcre(%d,%ld): %.*s\n", error, erroff,
+      fprintf( stderr, "pcre(%d,%" PRId64 "): %.*s\n", error, erroff,
                (int) gl.off, (char *) patbuf );
       return false;
     }

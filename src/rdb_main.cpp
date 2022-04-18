@@ -1,12 +1,21 @@
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS /* for freopen() */
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#ifndef _MSC_VER
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#else
+#include <windows.h>
+#endif
 #include <rdbparser/rdb_decode.h>
 #include <rdbparser/rdb_json.h>
 #include <rdbparser/rdb_restore.h>
@@ -45,7 +54,7 @@ show_error( RdbBufptr &bptr,  const uint8_t *start,  const uint8_t *end )
     char tmp[ 40 ];
     size_t off     = bptr.buf - start,
            end_off = end - start;
-    snprintf( tmp, sizeof( tmp ), "offset %lu (0x%lx)", off, off );
+    snprintf( tmp, sizeof( tmp ), "offset %" PRIu64 " (0x%" PRIx64 ")", off, off );
     if ( off < 256 )
       off = 0;
     else
@@ -53,7 +62,7 @@ show_error( RdbBufptr &bptr,  const uint8_t *start,  const uint8_t *end )
     off &= ~(size_t) 15;
     if ( end_off > off + 512 )
       end_off = off + 512;
-    printf( "%lx -> %lx\n", off, end_off );
+    printf( "%" PRIx64 " -> %" PRIx64 "\n", off, end_off );
     print_hex( tmp, off, end_off, start );
   }
 }
@@ -79,6 +88,9 @@ static bool    input_eof = true;
 static void
 fill_buf_stdin( void )
 {
+#ifdef _MSC_VER
+  freopen( NULL, "rb", stdin );
+#endif
   for (;;) {
     size_t n = fread( &input_buf[ input_off ], 1,
                       input_buf_size - input_off, stdin );
@@ -115,7 +127,11 @@ fill_buf_stdin( void )
       }
     }
   }
+#ifndef _MSC_VER
   ::perror( "malloc" );
+#else
+  fprintf( stderr, "err malloc: %d\n", GetLastError() );
+#endif
   exit( 1 );
 }
 
@@ -170,6 +186,7 @@ main( int argc, char *argv[] )
 
   /* map the file, if filename given */
   if ( fn != NULL ) {
+#ifndef _MSC_VER
     int fd = ::open( fn, O_RDONLY );
     struct stat st;
     if ( fd < 0 ) {
@@ -191,6 +208,32 @@ main( int argc, char *argv[] )
     ::close( fd );
     if ( ::madvise( map, input_off, MADV_SEQUENTIAL ) != 0 )
       ::perror( "madvise" );
+#else
+    HANDLE h = CreateFileA( fn, GENERIC_READ, NULL, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
+    LARGE_INTEGER st;
+    if ( h == INVALID_HANDLE_VALUE ) {
+      fprintf( stderr, "err open %s: %u\n", fn, GetLastError() );
+      return 1;
+    }
+    GetFileSizeEx( h, &st );
+    input_off = st.QuadPart;
+    HANDLE maph = CreateFileMappingA( h, NULL, PAGE_READONLY, 0, 0, NULL );
+    if ( maph == NULL ) {
+      fprintf( stderr, "err map %s: %u\n", fn, GetLastError() );
+      CloseHandle( h );
+      return 1;
+    }
+    map = MapViewOfFile( maph, FILE_MAP_READ, 0, 0, 0 );
+    if ( map == NULL ) {
+      fprintf( stderr, "err view %s: %u\n", fn, GetLastError() );
+      CloseHandle( h );
+      CloseHandle( maph );
+      return 1;
+    }
+    CloseHandle( h );
+    CloseHandle( maph );
+#endif
     input_buf = (uint8_t *) map;
   }
   /* load stdin buffer */
@@ -206,8 +249,12 @@ main( int argc, char *argv[] )
   /* set up the output */
   if ( list != NULL )
     decode.data_out = &list_out;
-  else if ( restore != NULL )
+  else if ( restore != NULL ) {
+#ifdef _MSC_VER
+    freopen( NULL, "wb", stdout );
+#endif
     decode.data_out = &rest_out;
+  }
   else {
     decode.data_out = &json_out;
     json_out.show_meta = ( meta != NULL );
@@ -248,8 +295,13 @@ main( int argc, char *argv[] )
   }
 break_loop:;
   decode.data_out->d_finish( true );
+#ifndef _MSC_VER
   if ( map != NULL )
     ::munmap( map, input_off );
+#else
+  if ( map != NULL )
+    UnmapViewOfFile( map );
+#endif
   else if ( input_buf != big_buf )
     ::free( input_buf );
   return 0;

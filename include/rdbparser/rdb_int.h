@@ -1,64 +1,84 @@
 #ifndef __rdbparser__rdb_int_h__
 #define __rdbparser__rdb_int_h__
 
+#ifdef _MSC_VER
+#define rdb_int_bswap16( x ) _byteswap_ushort( x )
+#define rdb_int_bswap32( x ) _byteswap_ulong( x )
+#define rdb_int_bswap64( x ) _byteswap_uint64( x )
+#else
+#define rdb_int_bswap16( x ) __builtin_bswap16( x )
+#define rdb_int_bswap32( x ) __builtin_bswap32( x )
+#define rdb_int_bswap64( x ) __builtin_bswap64( x )
+#endif
 #ifdef __cplusplus
 
 namespace rdbparser {
 
-template<class Int, bool swp> inline Int endian_read( const void *p ) {
-  Int i;
-  ::memcpy( &i, p, sizeof( Int ) );
-  if ( swp && sizeof( Int ) > 1 ) {
-    if ( sizeof( Int ) == 2 )
-      return __builtin_bswap16( i );
-    if ( sizeof( Int ) == 4 )
-      return __builtin_bswap32( i );
-    return __builtin_bswap64( i );
-  }
-  return i;
+template<bool swp> inline void endian_read( const void *p,  uint8_t &i ) {
+  ::memcpy( &i, p, sizeof( uint8_t ) );
+}
+template<bool swp> inline void endian_read( const void *p,  uint16_t &i ) {
+  ::memcpy( &i, p, sizeof( uint16_t ) );
+  if ( swp ) i = rdb_int_bswap16( i );
+}
+template<bool swp> inline void endian_read( const void *p,  uint32_t &i ) {
+  ::memcpy( &i, p, sizeof( uint32_t ) );
+  if ( swp ) i = rdb_int_bswap32( i );
+}
+template<bool swp> inline void endian_read( const void *p,  uint64_t &i ) {
+  ::memcpy( &i, p, sizeof( uint64_t ) );
+  if ( swp ) i = rdb_int_bswap64( i );
 }
 /* le = little endian */
 template<class Int> inline Int le( const void *p ) { /* little endian */
+  Int i;
 #ifdef MACH_IS_BIG_ENDIAN
-  return endian_read<Int, true>( p );
+  endian_read<true>( p, i );
 #else
-  return endian_read<Int, false>( p );
+  endian_read<false>( p, i );
 #endif
+  return i;
 }
 /* be = big endian */
 template<class Int> inline Int be( const void *p ) { /* big endian */
+  Int i;
 #ifdef MACH_IS_BIG_ENDIAN
-  return endian_read<Int, false>( p );
+  endian_read<false>( p, i );
 #else
-  return endian_read<Int, true>( p );
+  endian_read<true>( p, i );
 #endif
+  return i;
 }
 
-template<class Int, bool swp> inline void endian_write( void *p,  Int i ) {
-  if ( swp && sizeof( Int ) > 1 ) {
-    if ( sizeof( Int ) == 2 )
-      i = __builtin_bswap16( i );
-    else if ( sizeof( Int ) == 4 )
-      i = __builtin_bswap32( i );
-    else
-      i = __builtin_bswap64( i );
-  }
-  ::memcpy( p, &i, sizeof( Int ) );
+template<bool swp> inline void endian_write( void *p,  uint8_t i ) {
+  ::memcpy( p, &i, sizeof( uint8_t ) );
+}
+template<bool swp> inline void endian_write( void *p,  uint16_t i ) {
+  if ( swp ) i = rdb_int_bswap16( i );
+  ::memcpy( p, &i, sizeof( uint16_t ) );
+}
+template<bool swp> inline void endian_write( void *p,  uint32_t i ) {
+  if ( swp ) i = rdb_int_bswap32( i );
+  ::memcpy( p, &i, sizeof( uint32_t ) );
+}
+template<bool swp> inline void endian_write( void *p,  uint64_t i ) {
+  if ( swp ) i = rdb_int_bswap64( i );
+  ::memcpy( p, &i, sizeof( uint64_t ) );
 }
 /* le = little endian */
 template<class Int> inline void le( void *p,  Int i ) { /* little endian */
 #ifdef MACH_IS_BIG_ENDIAN
-  endian_write<Int, true>( p, i );
+  endian_write<true>( p, i );
 #else
-  endian_write<Int, false>( p, i );
+  endian_write<false>( p, i );
 #endif
 }
 /* be = big endian */
 template<class Int> inline void be( void *p,  Int i ) { /* big endian */
 #ifdef MACH_IS_BIG_ENDIAN
-  endian_write<Int, false>( p, i );
+  endian_write<false>( p, i );
 #else
-  endian_write<Int, true>( p, i );
+  endian_write<true>( p, i );
 #endif
 }
 /* unsigned encodings */

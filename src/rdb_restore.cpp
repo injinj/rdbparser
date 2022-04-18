@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <rdbparser/rdb_decode.h>
 #include <rdbparser/rdb_restore.h>
 
@@ -37,7 +39,7 @@ RestoreOutput::write_restore_cmd( void ) noexcept
     return;
   }
   RdbString     & key = this->dec.key;
-  const uint8_t * buf = &this->bptr.buf[ -this->bptr.offset ];
+  const uint8_t * buf = &this->bptr.buf[ -(int64_t) this->bptr.offset ];
   RdbLength       len;
   char            tmp[ 16 ]; /* snprintf() */
   int             n;
@@ -60,7 +62,7 @@ RestoreOutput::write_restore_cmd( void ) noexcept
     fwrite( restore, 1, sizeof( restore ) - 1, stdout );
   }
   /* write the key */
-  n = snprintf( tmp, sizeof( tmp ), "$%ld\r\n", key.s_len );
+  n = snprintf( tmp, sizeof( tmp ), "$%" PRId64 "\r\n", key.s_len );
   fwrite( tmp, 1, n, stdout );
   fwrite( key.s, 1, key.s_len, stdout );
 
@@ -69,7 +71,7 @@ RestoreOutput::write_restore_cmd( void ) noexcept
   fwrite( ttl_0, 1, sizeof( ttl_0 ) - 1, stdout );
   
   /* write the data length: <type><data><ver><crc> */
-  n = snprintf( tmp, sizeof( tmp ), "$%ld\r\n", end - start + 1 + 10 );
+  n = snprintf( tmp, sizeof( tmp ), "$%" PRId64 "\r\n", end - start + 1 + 10 );
   fwrite( tmp, 1, n, stdout ); /* $len\r\n */
 
   /* write the type byte */
