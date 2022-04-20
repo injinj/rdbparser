@@ -51,7 +51,7 @@ show_error( RdbBufptr &bptr,  const uint8_t *start,  const uint8_t *end )
     end = &bptr.buf[ bptr.avail ];
   }
   if ( bptr.buf >= start && bptr.buf < end ) {
-    char tmp[ 40 ];
+    char tmp[ 64 ];
     size_t off     = bptr.buf - start,
            end_off = end - start;
     snprintf( tmp, sizeof( tmp ), "offset %" PRIu64 " (0x%" PRIx64 ")", off, off );
