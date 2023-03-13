@@ -1,5 +1,17 @@
-lsb_dist     := $(shell if [ -x /usr/bin/lsb_release ] ; then lsb_release -is ; else uname -s ; fi)
-lsb_dist_ver := $(shell if [ -x /usr/bin/lsb_release ] ; then lsb_release -rs | sed 's/[.].*//' ; else uname -r | sed 's/[-].*//' ; fi)
+lsb_dist     := $(shell if [ -f /etc/redhat-release ] ; then \
+                  cat /etc/redhat-release | sed 's/ .*//' ; \
+                  elif [ -f /etc/os-release ] ; then \
+                  grep '^NAME=' /etc/os-release | sed 's/.*=\"//' | sed 's/ .*//' ; \
+                  elif [ -x /usr/bin/lsb_release ] ; then \
+                  lsb_release -is ; else echo Linux ; fi)
+lsb_dist_ver := $(shell if [ -f /etc/redhat-release ] ; then \
+                  cat /etc/redhat-release | sed s/.*release\ // | sed s/\ .*// ; \
+                  elif [ -f /etc/os-release ] ; then \
+                  grep '^VERSION=' /etc/os-release | sed 's/.*=\"//' | sed 's/ .*//' ; \
+                  elif [ -x /usr/bin/lsb_release ] ; then \
+                  lsb_release -rs | sed 's/[.].*//' ; else uname -r | sed 's/[-].*//' ; fi)
+#lsb_dist     := $(shell if [ -x /usr/bin/lsb_release ] ; then lsb_release -is ; else uname -s ; fi)
+#lsb_dist_ver := $(shell if [ -x /usr/bin/lsb_release ] ; then lsb_release -rs | sed 's/[.].*//' ; else uname -r | sed 's/[-].*//' ; fi)
 uname_m      := $(shell uname -m)
 
 short_dist_lc := $(patsubst CentOS,rh,$(patsubst RedHatEnterprise,rh,\
@@ -52,7 +64,7 @@ CFLAGS ?= $(RPM_OPT_FLAGS)
 endif
 cflags := $(gcc_wflags) $(CFLAGS) $(arch_cflags)
 
-INCLUDES   ?= -Iinclude
+INCLUDES   ?= -Iinclude -I/usr/include/liblzf
 DEFINES    ?=
 includes   := $(INCLUDES)
 defines    := $(DEFINES)
