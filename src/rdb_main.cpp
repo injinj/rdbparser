@@ -1,13 +1,16 @@
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS /* for freopen() */
 #endif
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+#define RDB_WINDOWS 1
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
-#ifndef _MSC_VER
+#ifndef RDB_WINDOWS
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
@@ -88,7 +91,7 @@ static bool    input_eof = true;
 static void
 fill_buf_stdin( void )
 {
-#ifdef _MSC_VER
+#ifdef RDB_WINDOWS
   freopen( NULL, "rb", stdin );
 #endif
   for (;;) {
@@ -127,10 +130,10 @@ fill_buf_stdin( void )
       }
     }
   }
-#ifndef _MSC_VER
+#ifndef RDB_WINDOWS
   ::perror( "malloc" );
 #else
-  fprintf( stderr, "err malloc: %d\n", GetLastError() );
+  fprintf( stderr, "err malloc: %ld\n", GetLastError() );
 #endif
   exit( 1 );
 }
@@ -186,7 +189,7 @@ main( int argc, char *argv[] )
 
   /* map the file, if filename given */
   if ( fn != NULL ) {
-#ifndef _MSC_VER
+#ifndef RDB_WINDOWS
     int fd = ::open( fn, O_RDONLY );
     struct stat st;
     if ( fd < 0 ) {
@@ -209,24 +212,24 @@ main( int argc, char *argv[] )
     if ( ::madvise( map, input_off, MADV_SEQUENTIAL ) != 0 )
       ::perror( "madvise" );
 #else
-    HANDLE h = CreateFileA( fn, GENERIC_READ, NULL, NULL,
+    HANDLE h = CreateFileA( fn, GENERIC_READ, 0, NULL,
                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
     LARGE_INTEGER st;
     if ( h == INVALID_HANDLE_VALUE ) {
-      fprintf( stderr, "err open %s: %u\n", fn, GetLastError() );
+      fprintf( stderr, "err open %s: %ld\n", fn, GetLastError() );
       return 1;
     }
     GetFileSizeEx( h, &st );
     input_off = st.QuadPart;
     HANDLE maph = CreateFileMappingA( h, NULL, PAGE_READONLY, 0, 0, NULL );
     if ( maph == NULL ) {
-      fprintf( stderr, "err map %s: %u\n", fn, GetLastError() );
+      fprintf( stderr, "err map %s: %ld\n", fn, GetLastError() );
       CloseHandle( h );
       return 1;
     }
     map = MapViewOfFile( maph, FILE_MAP_READ, 0, 0, 0 );
     if ( map == NULL ) {
-      fprintf( stderr, "err view %s: %u\n", fn, GetLastError() );
+      fprintf( stderr, "err view %s: %ld\n", fn, GetLastError() );
       CloseHandle( h );
       CloseHandle( maph );
       return 1;
@@ -250,7 +253,7 @@ main( int argc, char *argv[] )
   if ( list != NULL )
     decode.data_out = &list_out;
   else if ( restore != NULL ) {
-#ifdef _MSC_VER
+#ifdef RDB_WINDOWS
     freopen( NULL, "wb", stdout );
 #endif
     decode.data_out = &rest_out;
@@ -295,7 +298,7 @@ main( int argc, char *argv[] )
   }
 break_loop:;
   decode.data_out->d_finish( true );
-#ifndef _MSC_VER
+#ifndef RDB_WINDOWS
   if ( map != NULL )
     ::munmap( map, input_off );
 #else

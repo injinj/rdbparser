@@ -1,9 +1,10 @@
+# rdbparser makefile
 lsb_dist     := $(shell if [ -f /etc/os-release ] ; then \
-		  grep '^NAME=' /etc/os-release | sed 's/.*=\"//' | sed 's/ .*//' ; \
+                  grep '^NAME=' /etc/os-release | sed 's/.*=[\"]*//' | sed 's/[ \"].*//' ; \
                   elif [ -x /usr/bin/lsb_release ] ; then \
                   lsb_release -is ; else echo Linux ; fi)
 lsb_dist_ver := $(shell if [ -f /etc/os-release ] ; then \
-		  grep '^VERSION=' /etc/os-release | sed 's/.*=\"//' | sed 's/ .*//' | sed 's/\"//' ; \
+		  grep '^VERSION=' /etc/os-release | sed 's/.*=[\"]*//' | sed 's/[ \"].*//' ; \
                   elif [ -x /usr/bin/lsb_release ] ; then \
                   lsb_release -rs | sed 's/[.].*//' ; else uname -r | sed 's/[-].*//' ; fi)
 #lsb_dist     := $(shell if [ -x /usr/bin/lsb_release ] ; then lsb_release -is ; else uname -s ; fi)
@@ -33,25 +34,41 @@ endif
 ifeq (-a,$(findstring -a,$(port_extra)))
   default_cflags := -fsanitize=address -ggdb -O3
 endif
-
-CC          ?= gcc
-CXX         ?= $(CC) -x c++
-cpp         := $(CXX)
-# if not linking libstdc++
-ifdef NO_STL
-cppflags    := -std=c++11 -fno-rtti -fno-exceptions
-cpplink     := $(CC)
-else
-cppflags    := -std=c++11
-cpplink     := $(CXX)
+ifeq (-mingw,$(findstring -mingw,$(port_extra)))
+  CC    := /usr/bin/x86_64-w64-mingw32-gcc
+  CXX   := /usr/bin/x86_64-w64-mingw32-g++
+  mingw := true
 endif
-#cppflags  := -fno-rtti -fno-exceptions -fsanitize=address
-#cpplink   := $(CC) -lasan
+# msys2 using ucrt64
+ifeq (MSYS2,$(lsb_dist))
+  mingw := true
+endif
+CC          ?= gcc
+CXX         ?= g++
+cc          := $(CC) -std=c11
+cpp         := $(CXX)
 arch_cflags := -fno-omit-frame-pointer
 gcc_wflags  := -Wall -Wextra -Werror
-fpicflags   := -fPIC
-soflag      := -shared
 
+# if windows cross compile
+ifeq (true,$(mingw))
+dll         := dll
+exe         := .exe
+soflag      := -shared -Wl,--subsystem,windows
+fpicflags   := -fPIC -DRDB_SHARED
+dynlink_lib := -lpcre2-8
+NO_STL      := 1
+else
+dll         := so
+exe         :=
+soflag      := -shared
+fpicflags   := -fPIC
+dynlink_lib := -lpcre2-8
+endif
+# make apple shared lib
+ifeq (Darwin,$(lsb_dist))
+dll       := dylib
+endif
 # rpmbuild uses RPM_OPT_FLAGS
 ifeq ($(RPM_OPT_FLAGS),)
 CFLAGS ?= $(default_cflags)
@@ -60,14 +77,43 @@ CFLAGS ?= $(RPM_OPT_FLAGS)
 endif
 cflags := $(gcc_wflags) $(CFLAGS) $(arch_cflags)
 
-INCLUDES   ?= -Iinclude -I/usr/include/liblzf
+INCLUDES   ?= -Iinclude
 DEFINES    ?=
 includes   := $(INCLUDES)
 defines    := $(DEFINES)
 
-rpath      := -Wl,-rpath,$(pwd)/$(libd)
-cpp_lnk    :=
-lnk_lib    := -lpcre2-8 -llzf
+# if not linking libstdc++
+ifdef NO_STL
+cppflags    := -std=c++11 -fno-rtti -fno-exceptions
+cpplink     := $(CC)
+else
+cppflags    := -std=c++11
+cpplink     := $(CXX)
+endif
+
+# test submodules exist (they don't exist for dist_rpm, dist_dpkg targets)
+test_makefile = $(shell if [ -f ./$(1)/GNUmakefile ] ; then echo ./$(1) ; \
+                        elif [ -f ../$(1)/GNUmakefile ] ; then echo ../$(1) ; fi)
+
+lzf_home    := $(call test_makefile,lzf)
+
+ifneq (,$(lzf_home))
+lzf_lib     := $(lzf_home)/$(libd)/liblzf.a
+lzf_dll     := $(lzf_home)/$(libd)/liblzf.$(dll)
+lnk_lib     += $(lzf_lib)
+lnk_dep     += $(lzf_lib)
+dlnk_lib    += -L$(lzf_home)/$(libd) -llzf
+dlnk_dep    += $(lzf_dll)
+rpath1       = ,-rpath,$(pwd)/$(lzf_home)/$(libd)
+includes    += -I$(lzf_home)/include
+else
+lnk_lib     += -llzf
+dlnk_lib    += -llzf
+includes    += -Iliblzf
+endif
+
+rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)
+math_lib    := -lm
 
 .PHONY: everything
 everything: all
@@ -91,15 +137,15 @@ librdbparser_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(librdbparser_files
 librdbparser_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(librdbparser_files)))
 librdbparser_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(librdbparser_files))) \
                      $(addprefix $(dependd)/, $(addsuffix .fpic.d, $(librdbparser_files)))
-librdbparser_dlnk  := $(lnk_lib)
+librdbparser_dlnk  := $(dlnk_lib)
 librdbparser_spec  := $(version)-$(build_num)_$(git_hash)
 librdbparser_ver   := $(major_num).$(minor_num)
 
 $(libd)/librdbparser.a: $(librdbparser_objs)
-$(libd)/librdbparser.so: $(librdbparser_dbjs)
+$(libd)/librdbparser.$(dll): $(librdbparser_dbjs)
 
 all_libs    += $(libd)/librdbparser.a
-all_dlls    += $(libd)/librdbparser.so
+all_dlls    += $(libd)/librdbparser.$(dll)
 all_depends += $(librdbparser_deps)
 
 rdbp_files := rdb_main
@@ -110,9 +156,9 @@ rdbp_libs  := $(libd)/librdbparser.a
 # statically link it
 rdbp_lnk   := $(rdbp_libs) $(lnk_lib)
 
-$(bind)/rdbp: $(rdbp_objs) $(rdbp_libs)
+$(bind)/rdbp$(exe): $(rdbp_objs) $(rdbp_libs)
 
-all_exes    += $(bind)/rdbp
+all_exes    += $(bind)/rdbp$(exe)
 all_depends += $(rdbp_deps)
 
 all_dirs := $(bind) $(libd) $(objd) $(dependd)
@@ -201,9 +247,9 @@ remove_rpath = chrpath -d
 endif
 # target used by rpmbuild, dpkgbuild
 .PHONY: dist_bins
-dist_bins: $(all_libs) $(all_dlls) $(bind)/rdbp
-	$(remove_rpath) $(libd)/librdbparser.so
-	$(remove_rpath) $(bind)/rdbp
+dist_bins: $(all_libs) $(all_dlls) $(bind)/rdbp$(exe)
+	$(remove_rpath) $(libd)/librdbparser.$(dll)
+	$(remove_rpath) $(bind)/rdbp$(exe)
 
 # target for building installable rpm
 .PHONY: dist_rpm
@@ -249,11 +295,17 @@ $(objd)/%.fpic.o: src/%.cpp
 $(libd)/%.a:
 	ar rc $@ $($(*)_objs)
 
-$(libd)/%.so:
-	$(cpplink) $(soflag) $(rpath) $(cflags) -o $@.$($(*)_spec) -Wl,-soname=$(@F).$($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(cpp_dll_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
+ifeq (Darwin,$(lsb_dist))
+$(libd)/%.dylib:
+	$(cpplink) -dynamiclib $(cflags) -o $@.$($(*)_dylib).dylib -current_version $($(*)_dylib) -compatibility_version $($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
+	cd $(libd) && ln -f -s $(@F).$($(*)_dylib).dylib $(@F).$($(*)_ver).dylib && ln -f -s $(@F).$($(*)_ver).dylib $(@F)
+else
+$(libd)/%.$(dll):
+	$(cpplink) $(soflag) $(rpath) $(cflags) -o $@.$($(*)_spec) -Wl,-soname=$(@F).$($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
 	cd $(libd) && ln -f -s $(@F).$($(*)_spec) $(@F).$($(*)_ver) && ln -f -s $(@F).$($(*)_ver) $(@F)
+endif
 
-$(bind)/%:
+$(bind)/%$(exe):
 	$(cpplink) $(cflags) $(rpath) -o $@ $($(*)_objs) -L$(libd) $($(*)_lnk) $(cpp_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib)
 
 $(dependd)/%.d: src/%.cpp
