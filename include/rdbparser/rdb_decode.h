@@ -8,22 +8,26 @@
 namespace rdbparser {
 /* the redis rdb encoded data types, notes are based on rdb version 9 */
 enum RdbType {
-  RDB_STRING          = 0,            /* x data bytes */
-  RDB_LIST            = 1,            /* x not used, quicklist */
-  RDB_SET             = 2,            /* x list of string members */
-  RDB_ZSET            = 3,            /* x string + dbl string score */
-  RDB_HASH            = 4,            /* x list of strings for field + value */
-  RDB_ZSET_2          = 5,            /* x string + dbl binary score */
-  RDB_MODULE          = 6,            /* - what? */
-  RDB_MODULE_2        = 7,            /* - are these? */
-  RDB_BAD_TYPE        = 8,            /* x */
-  RDB_HASH_ZIPMAP     = 9,            /* - not used, ziplist */
-  RDB_LIST_ZIPLIST    = 10, /* a */   /* x not used, quicklist */
-  RDB_SET_INTSET      = 11, /* b */   /* x array of ints, all same size */
-  RDB_ZSET_ZIPLIST    = 12, /* c */   /* x ziplist of member + score */
-  RDB_HASH_ZIPLIST    = 13, /* d */   /* x ziplist of field + value */
-  RDB_LIST_QUICKLIST  = 14, /* e */   /* x list of ziplist */
-  RDB_STREAM_LISTPACK = 15  /* f */   /* - */
+  RDB_STRING             = 0,          /* x data bytes */
+  RDB_LIST               = 1,          /* x not used, quicklist */
+  RDB_SET                = 2,          /* x list of string members */
+  RDB_ZSET               = 3,          /* x string + dbl string score */
+  RDB_HASH               = 4,          /* x list of strings for field + value */
+  RDB_ZSET_2             = 5,          /* x string + dbl binary score */
+  RDB_MODULE             = 6,          /* - what? */
+  RDB_MODULE_2           = 7,          /* - are these? */
+  RDB_BAD_TYPE           = 8,          /* x */
+  RDB_HASH_ZIPMAP        = 9,          /* - not used, ziplist */
+  RDB_LIST_ZIPLIST       = 10, /* a */ /* x not used, quicklist */
+  RDB_SET_INTSET         = 11, /* b */ /* x array of ints, all same size */
+  RDB_ZSET_ZIPLIST       = 12, /* c */ /* x ziplist of member + score */
+  RDB_HASH_ZIPLIST       = 13, /* d */ /* x ziplist of field + value */
+  RDB_LIST_QUICKLIST     = 14, /* e */ /* x list of ziplist */
+  RDB_STREAM_LISTPACK    = 15, /* f */ /* - */
+  RDB_HASH_LISTPACK      = 16,
+  RDB_ZSET_LISTPACK      = 17,
+  RDB_LIST_QUICKLIST_2   = 18,
+  RDB_STREAM_LISTPACKS_2 = 19
 };
 
 /* info that is not data, encoded in the rdb file */
@@ -57,10 +61,9 @@ enum RdbErrCode {
 static inline RdbType
 get_rdb_type( uint8_t b ) /* the first byte in a rdb message */
 {
-  RdbType type = (RdbType) ( b & 0xf );
-  if ( ( b & 0xf0 ) != 0 || type == RDB_BAD_TYPE )
+  if ( b > RDB_STREAM_LISTPACKS_2 || b == RDB_BAD_TYPE )
     return RDB_BAD_TYPE;
-  return type;
+  return (RdbType) b;
 }
 
 /* an index into a stream of rdb atoms */
@@ -776,6 +779,10 @@ struct RdbDecode {
   RdbErrCode decode_ziplist( RdbBufptr &bptr ) noexcept;
   /* decode LIST_QUICKLIST types */
   RdbErrCode decode_quicklist( RdbBufptr &bptr ) noexcept;
+  /* decode LIST_QUICKLIST_2 types */
+  RdbErrCode decode_quicklist_2( RdbBufptr &bptr ) noexcept;
+  /* decode a HASH_LISTPACK, ZSET_LISTPACK type */
+  RdbErrCode decode_listpack( RdbBufptr &bptr ) noexcept;
   /* decode a STREAM_LISTPACK type */
   RdbErrCode decode_stream( RdbBufptr &bptr ) noexcept;
   /* decode a MODULE, MODULE_2 type */

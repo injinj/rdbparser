@@ -586,6 +586,18 @@ RdbDecode::decode_body( RdbBufptr &bptr ) noexcept
     case RDB_STREAM_LISTPACK:
       return this->decode_stream( bptr );
 
+    case RDB_HASH_LISTPACK:
+      return this->decode_listpack( bptr );
+
+    case RDB_ZSET_LISTPACK:
+      return this->decode_listpack( bptr );
+
+    case RDB_LIST_QUICKLIST_2:
+      return this->decode_quicklist_2( bptr );
+
+    case RDB_STREAM_LISTPACKS_2:
+      return this->decode_stream( bptr );
+
     case RDB_MODULE_2:
     case RDB_MODULE:
       return this->decode_module( bptr );
@@ -859,6 +871,102 @@ RdbDecode::decode_quicklist( RdbBufptr &bptr ) noexcept
 }
 
 RdbErrCode
+RdbDecode::decode_quicklist_2( RdbBufptr &bptr ) noexcept
+{
+  RdbListElem     list;
+  const uint8_t * b;
+  size_t          cnt;
+  RdbErrCode      err;
+
+  list.num = 0;
+  list.cnt = 0;
+  this->start_key();
+  /* for each container */
+  for ( cnt = this->rlen.len; cnt > 0; cnt-- ) {
+    RdbLength    container;
+    RdbLength    llen;
+    RdbListPack  lp;
+    RdbListValue lval;
+    if ( (err = container.decode( bptr )) != RDB_OK )
+      return err;
+    if ( (err = llen.decode( bptr )) != RDB_OK ||
+         (err = llen.consume( bptr, b )) != RDB_OK )
+      return err;
+    if ( container.len == 2 ) { /* is a PACKED container */
+      if ( ! lp.init( b, llen.len ) )
+        return RDB_ERR_TRUNC;
+      /* iterate the list pack values */
+      if ( lp.first( lval ) ) {
+        for ( ; ; list.num++ ) {
+          decode_lval( lval, list.val );
+          this->out->d_list( list );
+          if ( ! lp.next( lval ) )
+            break;
+        }
+      }
+    }
+    else /* if ( container.len == 1 ) is a PLAIN container */ {
+      return RDB_ERR_NOTSUP;
+    }
+  }
+  this->out->d_end_key();
+  return RDB_OK;
+}
+
+RdbErrCode
+RdbDecode::decode_listpack( RdbBufptr &bptr ) noexcept
+{
+  RdbListPack     lp;
+  RdbListValue    lval;
+  const uint8_t * b;
+
+  this->start_key();
+  /* the same structure, different outputs */
+  if ( (b = bptr.incr( this->rlen.len )) == NULL ||
+       ! lp.init( b, this->rlen.len ) )
+    return RDB_ERR_TRUNC;
+  switch ( this->type ) {
+    default:
+      return RDB_ERR_NOTSUP;
+
+    case RDB_HASH_LISTPACK: {   /* hash ziplist */
+      RdbHashEntry hash;
+      hash.cnt = 0;
+      if ( lp.first( lval ) ) {
+        for ( hash.num = 0; ; hash.num++ ) { /* foreach field : value */
+          decode_lval( lval, hash.field );
+          if ( ! lp.next( lval ) )
+            break;
+          decode_lval( lval, hash.val );
+          this->out->d_hash( hash );
+          if ( ! lp.next( lval ) )
+            break;
+        }
+      }
+      break;
+    }
+    case RDB_ZSET_LISTPACK: {   /* zset ziplist */
+      RdbZSetMember zset;
+      zset.cnt = 0;
+      if ( lp.first( lval ) ) {
+        for ( zset.num = 0; ; zset.num++ ) { /* foreach member : score */
+          decode_lval( lval, zset.member );
+          if ( ! lp.next( lval ) )
+            break;
+          decode_lval( lval, zset.score );
+          this->out->d_zset( zset );
+          if ( ! lp.next( lval ) )
+            break;
+        }
+      }
+      break;
+    }
+  }
+  this->out->d_end_key();
+  return RDB_OK;
+}
+
+RdbErrCode
 RdbDecode::decode_stream( RdbBufptr &bptr ) noexcept
 {
   /* decode stream entries */
@@ -904,12 +1012,28 @@ RdbDecode::decode_stream( RdbBufptr &bptr ) noexcept
   if ( entry.num != 0 )
     this->out->d_stream_end( RdbOutput::STREAM_ENTRY_LIST );
   /* info about the stream */
-  RdbLength num_elems, last_ms, last_ser, num_cgroups;
+  RdbLength num_elems, last_ms, first_ms, last_ser, first_ser,
+            max_del_ms, max_del_ser, num_cgroups, group_off;
 
   if ( (err = num_elems.decode( bptr )) != RDB_OK ||
        (err = last_ms.decode( bptr )) != RDB_OK ||
-       (err = last_ser.decode( bptr )) != RDB_OK ||
-       (err = num_cgroups.decode( bptr )) != RDB_OK )
+       (err = last_ser.decode( bptr )) != RDB_OK )
+    return err;
+
+  if ( this->type == RDB_STREAM_LISTPACKS_2 ) {
+    if ( (err = first_ms.decode( bptr )) != RDB_OK ||
+         (err = first_ser.decode( bptr )) != RDB_OK )
+      return err;
+
+    if ( (err = max_del_ms.decode( bptr )) != RDB_OK ||
+         (err = max_del_ser.decode( bptr )) != RDB_OK )
+      return err;
+
+    if ( (err = num_elems.decode( bptr )) != RDB_OK )
+      return err;
+  }
+
+  if ( (err = num_cgroups.decode( bptr )) != RDB_OK )
     return err;
 
   RdbStreamInfo str( entry.num );
@@ -936,6 +1060,11 @@ RdbDecode::decode_stream( RdbBufptr &bptr ) noexcept
          (err = last_ser.decode( bptr )) != RDB_OK )
       return err;
     group.last.set( last_ms.len, last_ser.len );
+
+    if ( this->type == RDB_STREAM_LISTPACKS_2 ) {
+      if ( (err = group_off.decode( bptr )) != RDB_OK )
+        return err;
+    }
 
     RdbLength pend_cnt;
     if ( (err = pend_cnt.decode( bptr )) != RDB_OK )
