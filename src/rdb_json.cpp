@@ -146,6 +146,7 @@ JsonOutput::d_start_key( void ) noexcept
     case RDB_LIST:
     case RDB_LIST_ZIPLIST:
     case RDB_LIST_QUICKLIST:
+    case RDB_LIST_QUICKLIST_2:
       fmt = " : [\n";
       typ = "list";
       break;
@@ -157,20 +158,24 @@ JsonOutput::d_start_key( void ) noexcept
     case RDB_ZSET:
     case RDB_ZSET_2:
     case RDB_ZSET_ZIPLIST:
+    case RDB_ZSET_LISTPACK:
       fmt = " : {\n";
       typ = "zset";
       break;
     case RDB_HASH:
     case RDB_HASH_ZIPMAP:
     case RDB_HASH_ZIPLIST:
+    case RDB_HASH_LISTPACK:
       fmt = " : {\n";
       typ = "hash";
       break;
     case RDB_STREAM_LISTPACK:
+    case RDB_STREAM_LISTPACKS_2:
       fmt = " : {\n";
       typ = "stream";
       break;
     case RDB_MODULE_2:
+    case RDB_MODULE:
       fmt = " : ";
       typ = "module";
       break;
@@ -198,10 +203,12 @@ JsonOutput::d_end_key( void ) noexcept
   switch ( this->dec.type ) {
     case RDB_STRING:
     case RDB_MODULE_2:
+    case RDB_MODULE:
       break;
     case RDB_LIST:
     case RDB_LIST_ZIPLIST:
     case RDB_LIST_QUICKLIST:
+    case RDB_LIST_QUICKLIST_2:
       printf( "\n]" );
       break;
     case RDB_SET:
@@ -211,14 +218,17 @@ JsonOutput::d_end_key( void ) noexcept
     case RDB_ZSET:
     case RDB_ZSET_2:
     case RDB_ZSET_ZIPLIST:
+    case RDB_ZSET_LISTPACK:
       printf( "\n}" );
       break;
     case RDB_HASH:
     case RDB_HASH_ZIPMAP:
     case RDB_HASH_ZIPLIST:
+    case RDB_HASH_LISTPACK:
       printf( "\n}" );
       break;
     case RDB_STREAM_LISTPACK:
+    case RDB_STREAM_LISTPACKS_2:
       printf( "\n}" );
       break;
     default:
