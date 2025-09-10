@@ -248,7 +248,12 @@ void
 JsonOutput::d_hash( const RdbHashEntry &h ) noexcept
 {
   tab( h.num != 0, ",\n", 1 );
-  print_s( h.field ); printf( " : " ); print_s( h.val );
+  if ( h.field.coding != RDB_STR_VAL )
+    printf( "\"" );
+  print_s( h.field );
+  if ( h.field.coding != RDB_STR_VAL )
+    printf( "\"" );
+  printf( " : " ); print_s( h.val );
 }
 
 void
